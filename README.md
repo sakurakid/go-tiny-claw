@@ -1,37 +1,21 @@
 # go-tiny-claw
 
-一个用 Java 编写的 Agent Harness 练习项目。
+一个用 Java 编写的 Agent Harness 练习 Demo。
 
-这个仓库不是生产级 Agent 框架，而是我用来学习和复现 Agent Harness 思路的简易 Demo。原始参考思路来自 Go 版本的 tiny-claw / claw 风格工程，但这里会用 Java 重新实现一遍，重点练习 Harness 这一层如何组织模型、上下文、工具、状态和安全边界。
+这个仓库参考 tiny-claw / claw 风格的 Go 项目结构，但实现语言使用 Java。当前目标不是做一个完整框架，而是用最少代码跑通 Harness 最核心的几件事：统一上下文协议、Main Loop、Provider 抽象、Tool Registry。
 
-## 项目定位
+## 当前重点
 
-我想通过这个项目练习一个核心判断：
+这一步先实现系统的统一血液：`schema`。
 
-> 传统 Framework Layer 正在坍塌进 Harness。
+在 Harness 里，大模型、工具、主循环之间传递的数据都应该走同一套标准结构。不同模型厂商的 API 可以各不相同，但进入 go-tiny-claw 内部之后，都要被转换成自己的 `Message / ToolCall / ToolResult / ToolDefinition`。
 
-早期 Agent Framework 往往依赖 Chain、DAG、Node、Edge 这类厚抽象，把业务流程写死在代码里。现在模型本身已经具备较强的规划和工具调用能力，所以更值得练习的是底层 Harness：它不替模型思考，而是给模型提供一个更稳的运行环境。
+这样做的好处是：
 
-在这个 Demo 里，大模型像 CPU，Context 像内存，Tool 像外设，Harness 像一个小型操作系统：
-
-- 管理上下文，而不是盲目塞工具描述。
-- 暴露极简工具，而不是堆一堆复杂能力。
-- 把 PLAN / TODO 外置到文件系统，而不是藏在黑盒状态机里。
-- 对 bash、写文件等能力加拦截点，后续接 Human-in-the-loop 审批。
-
-## 当前实现
-
-目前已经落了一个能跑起来的 Java 最小骨架：
-
-- CLI 入口：`lab.agentharness.claw.Main`
-- 核心引擎：`AgentEngine`
-- 模型适配：`ModelProvider` + `MockProvider`
-- 上下文工程：`ContextManager`、`PromptComposer`、`TokenMonitor`
-- 工具系统：`ToolRegistry`、`read_file`、`write_file`、`edit_file`、`bash`
-- 安全拦截：`DangerousCommandMiddleware`
-- 人工审批占位：`ApprovalGateway`、`ConsoleApprovalGateway`
-- 文件记忆占位：`FileMemoryStore`
-- 飞书集成占位：`FeishuAgentOpsClient`
+- Main Loop 不绑定 OpenAI 或 Claude 的具体 API 格式。
+- 工具参数用 `RawJson` 原样传递，Main Loop 不解析具体参数。
+- Provider 只负责把模型输出转换成内部 `Schema.Message`。
+- Tool Registry 只负责把 `ToolCall` 分发给具体工具。
 
 ## 项目结构
 
@@ -39,51 +23,21 @@
 go-tiny-claw/
 ├── pom.xml
 ├── README.md
-└── src/
-    └── main/
-        └── java/
-            └── lab/
-                └── agentharness/
-                    ├── claw/       # Java 版入口，对应 Go 示例里的 cmd/claw/main.go
-                    ├── engine/     # MainLoop / ReAct 核心循环
-                    ├── provider/   # 大模型 Provider 抽象与 Mock 实现
-                    ├── context/    # Prompt 动态组装、Token 估算、外部记忆读取
-                    ├── tools/      # Tool Registry、内置工具、Middleware
-                    ├── memory/     # PLAN / TODO 文件记忆占位
-                    ├── entry/      # 人工审批入口占位
-                    ├── feishu/     # 飞书 AgentOps 集成占位
-                    └── thinking/   # 行动前慢思考模块
+├── docs/
+│   └── main-loop-and-schema.md
+└── src/main/java/lab/agentharness/
+    ├── claw/
+    │   └── Main.java              # Demo 入口，装配 MockProvider、ToolRegistry、Loop
+    ├── engine/
+    │   └── Loop.java              # Main Loop / ReAct 核心循环
+    ├── provider/
+    │   ├── ModelProvider.java     # LLM Provider 接口
+    │   └── MockProvider.java      # 本地 Mock，模拟工具调用
+    ├── schema/
+    │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
+    └── tools/
+        └── ToolRegistry.java      # 工具注册与分发，内含 demo 工具
 ```
-
-这里暂时没有 `src/test/java`。它是 Maven 标准测试目录，后续开始补单元测试时再加回来。
-
-## Java 版入口
-
-Go 版本示例大概是：
-
-```go
-func main() {
-    fmt.Println("欢迎来到 go-tiny-claw 引擎启动序列")
-    // 初始化 Provider
-    // 初始化 Tool Registry
-    // 初始化 Context Manager
-    // 组装 Engine 并启动
-}
-```
-
-当前 Java 版本对应在：
-
-```text
-src/main/java/lab/agentharness/claw/Main.java
-```
-
-它会完成：
-
-1. 初始化 `MockProvider`，先不接真实大模型。
-2. 注册 `read_file / write_file / edit_file / bash` 四个极简工具。
-3. 初始化 `ContextManager`。
-4. 组装 `AgentEngine`。
-5. 跑一次本地 Mock 任务，验证启动链路。
 
 ## 运行方式
 
@@ -92,22 +46,28 @@ mvn clean package
 mvn exec:java
 ```
 
-也可以直接运行打出来的 jar：
+也可以直接运行 jar：
 
 ```bash
 java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
 ```
 
-## 后续练习方向
+## 当前 Demo 会做什么
 
-1. 把 `MockProvider` 替换成 OpenAI / Claude 兼容 Provider。
-2. 让 `AgentEngine` 支持真正的 ReAct tool-call 循环。
-3. 给 `bash` 和文件写入动作增加更细的审批策略。
-4. 引入 `PLAN.md` / `TODO.md`，把运行状态外置。
-5. 增加上下文压缩器，模拟 Token 水位线回收。
-6. 补飞书审批回调，练习 Human-in-the-loop。
-7. 再补 `src/test/java`，用测试锁住工具、上下文和拦截器行为。
+1. `Main` 初始化 `MockProvider` 和 `ToolRegistry`。
+2. `Loop` 创建系统消息和用户任务。
+3. `MockProvider` 第一轮返回一个 `read_file` 的 `ToolCall`。
+4. `Loop` 不解析参数，只把 `RawJson` 交给 `ToolRegistry`。
+5. `ToolRegistry` 执行读取 `README.md`，返回 `ToolResult`。
+6. `Loop` 把工具结果作为 Observation 写回上下文。
+7. `MockProvider` 第二轮返回最终文本，任务结束。
 
-## 备注
+## 后续练习
 
-仓库名仍然叫 `go-tiny-claw`，是为了保留参考来源和练习上下文；实际实现会以 Java 为主。
+接下来可以继续补：
+
+- 更真实的 ReAct 响应解析。
+- OpenAI / Claude Provider 适配。
+- 更完整的 JSON Schema 和参数校验。
+- Bash 工具审批与危险命令拦截。
+- Token 水位监控与上下文压缩。
