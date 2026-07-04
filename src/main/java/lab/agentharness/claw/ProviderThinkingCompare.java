@@ -9,6 +9,7 @@ import lab.agentharness.provider.AnthropicCompatibleProvider;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.provider.OpenAICompatibleProvider;
 import lab.agentharness.schema.Schema;
+import lab.agentharness.tools.BaseTool;
 import lab.agentharness.tools.Registry;
 
 /**
@@ -68,6 +69,11 @@ public final class ProviderThinkingCompare {
      * 伪造天气工具注册表，用来测试真实模型能否正确发起和接收工具调用。
      */
     private static final class MockWeatherRegistry implements Registry {
+        @Override
+        public void register(BaseTool tool) {
+            throw new UnsupportedOperationException("MockWeatherRegistry 不支持动态挂载工具。");
+        }
+
         @Override
         public List<Schema.ToolDefinition> getAvailableTools() {
             return List.of(new Schema.ToolDefinition(

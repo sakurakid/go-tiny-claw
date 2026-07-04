@@ -9,6 +9,11 @@ import lab.agentharness.schema.Schema;
  */
 public interface Registry {
     /**
+     * 挂载一个新的工具到系统中。
+     */
+    void register(BaseTool tool);
+
+    /**
      * 返回当前系统挂载的所有可用工具 Schema。
      */
     List<Schema.ToolDefinition> getAvailableTools();

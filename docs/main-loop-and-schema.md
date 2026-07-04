@@ -43,14 +43,26 @@ public interface LLMProvider {
 Java 版工具注册表接口：
 
 ```java
+public interface BaseTool {
+    String name();
+
+    Schema.ToolDefinition definition();
+
+    String execute(Schema.RawJson arguments) throws Exception;
+}
+```
+
+```java
 public interface Registry {
+    void register(BaseTool tool);
+
     List<Schema.ToolDefinition> getAvailableTools();
 
     Schema.ToolResult execute(Schema.ToolCall call);
 }
 ```
 
-这样 `AgentEngine` 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只依赖接口和 WorkDir：
+`BaseTool` 是具体工具的接口，`Registry` 是动态挂载和路由分发的接口。这样 `AgentEngine` 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只依赖接口和 WorkDir：
 
 ```java
 public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking)
@@ -102,7 +114,7 @@ Schema.Message actionResp = provider.generate(contextHistory, availableTools);
 当前 `MockProvider` 的验证逻辑是：
 
 - 如果 `availableTools` 为空，返回一段内部思考。
-- 如果 `availableTools` 非空且还没有 Observation，返回一个 `bash` ToolCall。
+- 如果 `availableTools` 非空且还没有 Observation，返回一个 `read_file` ToolCall。
 - 如果已经有 Observation，返回最终结果。
 
 这让 demo 能展示完整链路：
@@ -121,7 +133,30 @@ Thinking -> Action -> Observation -> Thinking -> Final Answer
 - `schema`：统一协议。
 - `tools`：工具注册与分发。
 
-## 6. 模型接入层：双协议 Provider
+## 6. 动态 Registry 与 read_file 工具
+
+这一步开始，工具层不再把 demo 工具藏在注册表内部，而是拆成三块：
+
+```text
+src/main/java/lab/agentharness/tools/BaseTool.java
+src/main/java/lab/agentharness/tools/ToolRegistry.java
+src/main/java/lab/agentharness/tools/ReadFileTool.java
+```
+
+`ToolRegistry` 只做三件事：
+
+1. `register(tool)`：按工具名动态挂载工具。
+2. `getAvailableTools()`：把所有工具的 `ToolDefinition` 暴露给 Provider。
+3. `execute(call)`：按 `ToolCall.name()` 路由执行，并把异常统一封装成 `ToolResult`。
+
+`ReadFileTool` 是第一个真实物理工具，设计上保留两个 Harness 防线：
+
+- 路径边界：模型只能读取 `WorkDir` 内部文件，不能通过 `../` 跳出工作区。
+- 内容截断：最多返回前 8000 字节，避免读取大日志导致上下文失控。
+
+当前 `Main` 会挂载 `ReadFileTool`，并要求模型读取项目根目录下的 `hello.txt`。这能验证真实 ToolCall、真实文件 IO 和 Observation 回写是否跑通。
+
+## 7. 模型接入层：双协议 Provider
 
 Java 侧可以直接使用官方 SDK：
 

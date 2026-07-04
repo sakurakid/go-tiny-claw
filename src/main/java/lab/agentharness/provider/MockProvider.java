@@ -24,18 +24,18 @@ public final class MockProvider implements LLMProvider {
             }
 
             return Schema.Message.assistant(
-                    "【推理中】目标是检查当前目录文件。我不能直接盲猜，需要先调用 bash 工具列出工作区文件，再根据 Observation 总结。");
+                    "【推理中】目标是读取 hello.txt。我不能直接盲猜，需要先调用 read_file 工具读取文件，再根据 Observation 总结。");
         }
 
         if (!hasObservation) {
-            Schema.ToolCall listFiles = new Schema.ToolCall(
-                    "call_list_files_001",
-                    "bash",
-                    Schema.RawJson.of("{\"command\":\"" + listCommand() + "\"}"));
+            Schema.ToolCall readHello = new Schema.ToolCall(
+                    "call_read_hello_001",
+                    "read_file",
+                    Schema.RawJson.of("{\"path\":\"hello.txt\"}"));
 
             return Schema.Message.assistant(
-                    "我要执行刚才计划的步骤，调用 bash 查看当前工作区文件。",
-                    List.of(listFiles));
+                    "我要执行刚才计划的步骤，调用 read_file 读取 hello.txt。",
+                    List.of(readHello));
         }
 
         String observation = messages.stream()
@@ -45,17 +45,12 @@ public final class MockProvider implements LLMProvider {
                 .orElse("没有拿到工具返回。");
 
         return Schema.Message.assistant("""
-                我看到了当前目录的文件列表，说明 Main Loop 已经完成了一轮 Action/Observation。
-                当前项目包含 Maven 配置、README、docs 和 src 目录，任务完成。
+                我看到了 hello.txt 的文件内容，说明 Main Loop 已经完成了一轮 Action/Observation。
+                文件说明这个项目正在验证动态 Registry 和 read_file 工具，任务完成。
 
                 Observation 摘要：
                 %s
                 """.formatted(firstLines(observation, 6)));
-    }
-
-    private static String listCommand() {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        return os.contains("win") ? "dir /b" : "ls -la";
     }
 
     private static String firstLines(String text, int maxLines) {

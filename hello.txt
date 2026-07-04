@@ -1,0 +1,2 @@
+你好，我是 go-tiny-claw Java 版的 read_file 工具测试文件。
+如果模型能读取到这段文字，说明动态 Registry 已经把真实文件读取能力挂载到了 Harness 上。

@@ -14,7 +14,7 @@ go-tiny-claw/
 │   └── main-loop-and-schema.md
 └── src/main/java/lab/agentharness/
     ├── claw/
-    │   ├── Main.java              # Demo 入口，装配 MockProvider、ToolRegistry、AgentEngine
+    │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
     │   └── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
     ├── engine/
@@ -27,19 +27,23 @@ go-tiny-claw/
     ├── schema/
     │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
     └── tools/
+        ├── BaseTool.java          # 所有本地工具的统一接口
+        ├── ReadFileTool.java      # 读取工作区文件的真实工具
         ├── Registry.java          # 工具注册表接口
-        └── ToolRegistry.java      # 工具注册与分发，内含 demo 工具
+        └── ToolRegistry.java      # 动态工具注册与分发
 ```
 
 ## 当前实现
 
 - `Schema` 定义系统统一血液：`Message / ToolCall / ToolResult / ToolDefinition / RawJson`。
 - `LLMProvider` 抽象大模型调用：`generate(messages, availableTools)`。
-- `Registry` 抽象工具注册与分发：`getAvailableTools()` 和 `execute(call)`。
+- `BaseTool` 规范具体工具：`name()`、`definition()` 和 `execute(arguments)`。
+- `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
 - `OpenAICompatibleProvider` 支持 DeepSeek / 智谱等 OpenAI-compatible 服务。
 - `AnthropicCompatibleProvider` 支持 Claude / 兼容 Anthropic Messages API 的服务。
+- `ReadFileTool` 是第一个真实物理工具：读取 `WorkDir` 内文件，并做路径边界校验与 8000 字节截断。
 
 ## 慢思考模式
 
@@ -59,18 +63,25 @@ AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, tru
 ## 当前 Demo 会做什么
 
 1. `Main` 获取当前目录作为 `WorkDir` 物理边界。
-2. `Main` 初始化 `MockProvider` 和 `ToolRegistry`。
+2. `Main` 初始化真实 Provider 和 `ToolRegistry`。
 3. `AgentEngine` 创建 `contextHistory`，写入 system message 和 user message。
-4. Turn 1 Thinking：`MockProvider` 输出内部规划。
-5. Turn 1 Action：`MockProvider` 请求调用 `bash` 列目录。
-6. `ToolRegistry` 执行命令，返回 `ToolResult`。
+4. `ToolRegistry` 挂载真实 `ReadFileTool`。
+5. 模型需要调用 `read_file` 读取 `hello.txt`。
+6. `ToolRegistry` 路由到 `ReadFileTool`，返回真实文件内容。
 7. `AgentEngine` 把工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
-8. Turn 2 Thinking：`MockProvider` 根据 Observation 规划总结。
-9. Turn 2 Action：`MockProvider` 返回最终文本，任务结束。
+8. 模型根据 Observation 用一句话总结文件内容，任务结束。
 
 ## 运行方式
 
 ```bash
+# 智谱
+set ZHIPU_API_KEY=你的 key
+set CLAW_PROVIDER=zhipu
+
+# 或 DeepSeek
+set DEEPSEEK_API_KEY=你的 key
+set CLAW_PROVIDER=deepseek
+
 mvn clean package
 mvn exec:java
 ```
