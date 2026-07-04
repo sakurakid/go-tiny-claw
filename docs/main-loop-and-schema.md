@@ -142,7 +142,7 @@ go-tiny-claw Schema -> 厂商 API Request
 
 OpenAI-compatible 当前支持：
 
-- DeepSeek：`DEEPSEEK_API_KEY`，默认模型 `deepseek-chat`
+- DeepSeek：`DEEPSEEK_API_KEY`，默认模型 `deepseek-v4-flash`
 - 智谱：`ZHIPU_API_KEY`，默认模型 `glm-4-flash`
 
 Anthropic-compatible 当前预留：

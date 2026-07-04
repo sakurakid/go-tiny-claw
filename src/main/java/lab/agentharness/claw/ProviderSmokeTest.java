@@ -36,7 +36,7 @@ public final class ProviderSmokeTest {
 
     private static LLMProvider provider(String providerName) {
         return switch (providerName.toLowerCase()) {
-            case "deepseek" -> OpenAICompatibleProvider.newDeepSeekProvider(env("DEEPSEEK_MODEL", "deepseek-chat"));
+            case "deepseek" -> OpenAICompatibleProvider.newDeepSeekProvider(env("DEEPSEEK_MODEL", "deepseek-v4-flash"));
             case "zhipu", "zhipu-openai" -> OpenAICompatibleProvider.newZhipuProvider(env("ZHIPU_MODEL", "glm-4-flash"));
             case "claude", "anthropic" -> AnthropicCompatibleProvider.newClaudeProvider(env("ANTHROPIC_MODEL", "claude-sonnet-4-5"));
             case "zhipu-claude", "zhipu-anthropic" -> AnthropicCompatibleProvider.newZhipuClaudeProvider(env("ZHIPU_CLAUDE_MODEL", "glm-4.5"));
