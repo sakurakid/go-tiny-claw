@@ -2,6 +2,9 @@ package lab.agentharness.provider;
 
 import java.util.stream.Collectors;
 
+/**
+ * 本地假模型实现，用来在没有真实大模型 API 的情况下验证 Harness 启动链路。
+ */
 public final class MockProvider implements ModelProvider {
     @Override
     public String name() {

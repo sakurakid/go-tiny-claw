@@ -13,6 +13,9 @@ import lab.agentharness.tools.ToolResult;
 import lab.agentharness.tools.ToolSpec;
 import lab.agentharness.tools.middleware.ToolMiddleware;
 
+/**
+ * 终端执行工具，负责把模型请求转换成本地 shell 命令并交给 Middleware 做安全检查。
+ */
 public final class BashTool implements Tool {
     private final ToolMiddleware middleware;
     private final Duration timeout = Duration.ofSeconds(10);

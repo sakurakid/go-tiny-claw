@@ -8,6 +8,9 @@ import lab.agentharness.tools.ToolRequest;
 import lab.agentharness.tools.ToolResult;
 import lab.agentharness.tools.ToolSpec;
 
+/**
+ * 内置写文件工具，只允许在工作区内创建或覆盖文本文件。
+ */
 public final class WriteFileTool implements Tool {
     private final Path workspace;
 

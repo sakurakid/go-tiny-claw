@@ -5,6 +5,9 @@ import java.util.stream.Collectors;
 
 import lab.agentharness.tools.ToolSpec;
 
+/**
+ * Prompt 动态组装器，将任务、工具描述和文件系统记忆拼成模型可读的系统上下文。
+ */
 public final class PromptComposer {
     public String compose(String task, List<ToolSpec> toolSpecs, String memorySnapshot) {
         String tools = toolSpecs.stream()

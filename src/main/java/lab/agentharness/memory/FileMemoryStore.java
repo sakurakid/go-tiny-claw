@@ -3,6 +3,9 @@ package lab.agentharness.memory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+/**
+ * 文件系统记忆存储，占位承载 PLAN.md 和 TODO.md 这类可人工介入的外部状态。
+ */
 public final class FileMemoryStore {
     private final Path workspace;
 

@@ -5,6 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 工具注册表，保存 Harness 当前开放给模型的极简工具集合。
+ */
 public final class ToolRegistry {
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 

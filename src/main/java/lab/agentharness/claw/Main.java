@@ -16,6 +16,9 @@ import lab.agentharness.tools.builtin.ReadFileTool;
 import lab.agentharness.tools.builtin.WriteFileTool;
 import lab.agentharness.tools.middleware.DangerousCommandMiddleware;
 
+/**
+ * CLI 启动入口，负责按顺序装配 Provider、工具注册表、上下文管理器和核心引擎。
+ */
 public final class Main {
     private static final Logger LOG = Logger.getLogger(Main.class.getName());
 

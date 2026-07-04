@@ -6,6 +6,9 @@ import java.util.List;
 
 import lab.agentharness.tools.ToolSpec;
 
+/**
+ * 上下文工程入口，负责读取外部化记忆、组装 Prompt 并估算当前上下文水位。
+ */
 public final class ContextManager {
     private final Path workspace;
     private final PromptComposer promptComposer;

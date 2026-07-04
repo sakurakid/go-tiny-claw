@@ -8,6 +8,9 @@ import lab.agentharness.tools.ToolRequest;
 import lab.agentharness.tools.ToolResult;
 import lab.agentharness.tools.ToolSpec;
 
+/**
+ * 内置编辑工具，提供工作区内文件的最小文本替换能力。
+ */
 public final class EditFileTool implements Tool {
     private final Path workspace;
 

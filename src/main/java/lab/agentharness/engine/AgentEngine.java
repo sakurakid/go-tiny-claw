@@ -11,6 +11,9 @@ import lab.agentharness.provider.ModelResponse;
 import lab.agentharness.thinking.ThinkingModule;
 import lab.agentharness.tools.ToolRegistry;
 
+/**
+ * Harness 的核心运行时，负责组织一次最小 ReAct 主循环并连接模型、上下文和工具层。
+ */
 public final class AgentEngine {
     private static final Logger LOG = Logger.getLogger(AgentEngine.class.getName());
 
