@@ -123,18 +123,41 @@ public interface Registry {
 
 当前 demo 先不引入 Java 版 `context.Context` 等价物，避免把练习项目做重。后续如果要支持取消、超时、trace id，可以再加一个很薄的 `RunContext` 参数。
 
-抽象之后，`Loop` 的构造函数只依赖接口：
+抽象之后，`AgentEngine` 的构造函数只依赖接口和 WorkDir：
 
 ```java
-public Loop(LLMProvider provider, Registry tools)
+public AgentEngine(LLMProvider provider, Registry registry, Path workDir)
 ```
 
-这样 Main Loop 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只负责四件事：
+这样 Main Loop 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只负责五件事：
 
 1. 组装上下文。
 2. 调用 `provider.generate(...)`。
 3. 判断是否有 `ToolCall`。
 4. 调用 `tools.execute(call)` 并记录 Observation。
+5. 用 `WorkDir` 标记 Agent 的物理工作边界。
+
+## 最终 Main Loop
+
+当前 `engine/AgentEngine.java` 对齐 Go 示例里的 `AgentEngine`：
+
+- `provider`：大模型接口，对应大脑。
+- `registry`：工具注册表接口，对应手脚。
+- `workDir`：工作区物理边界，避免 Agent 没有活动范围。
+
+`run(userPrompt)` 做的事情是：
+
+1. 打印引擎启动日志，并锁定 `workDir`。
+2. 初始化 `contextHistory`，写入 system message 和 user message。
+3. 进入 while 循环，并用 `MAX_TURNS` 防止 Doom Loop。
+4. 每轮获取 `registry.getAvailableTools()`。
+5. 调用 `provider.generate(contextHistory, availableTools)`。
+6. 将模型响应完整追加回上下文。
+7. 如果模型没有工具调用，说明任务完成，退出循环。
+8. 如果模型请求工具调用，逐个执行 `registry.execute(toolCall)`。
+9. 将工具返回封装成 `Schema.Message.observation(toolCall.id(), result.output())` 写回上下文。
+
+这里最重要的是 Observation 必须携带 `ToolCallID`。它是模型在下一轮推理时关联“刚才那个 Action”和“工具返回结果”的线索。
 
 ## 为什么保持目录简单
 

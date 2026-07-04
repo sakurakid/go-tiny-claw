@@ -17,14 +17,14 @@ public final class MockProvider implements LLMProvider {
     public Schema.Message generate(List<Schema.Message> messages, List<Schema.ToolDefinition> availableTools) {
         boolean hasObservation = messages.stream().anyMatch(message -> message.toolCallId() != null);
         if (!hasObservation) {
-            Schema.ToolCall readReadme = new Schema.ToolCall(
-                    "call_readme_001",
-                    "read_file",
-                    Schema.RawJson.of("{\"path\":\"README.md\"}"));
+            Schema.ToolCall listFiles = new Schema.ToolCall(
+                    "call_list_files_001",
+                    "bash",
+                    Schema.RawJson.of("{\"command\":\"" + listCommand() + "\"}"));
 
             return Schema.Message.assistant(
-                    "我先读取 README.md，拿到 Observation 后再总结项目当前状态。",
-                    List.of(readReadme));
+                    "让我来看看当前工作区下有什么文件。",
+                    List.of(listFiles));
         }
 
         String observation = messages.stream()
@@ -34,12 +34,17 @@ public final class MockProvider implements LLMProvider {
                 .orElse("没有拿到工具返回。");
 
         return Schema.Message.assistant("""
-                基于工具 Observation，这个项目目前是一个 Java 版 Agent Harness 练习 Demo。
-                它正在用极简结构验证 Main Loop、Provider、Schema 和 Tool Registry 之间如何传递上下文。
+                我看到了当前目录的文件列表，说明 Main Loop 已经完成了一轮 Action/Observation。
+                当前项目包含 Maven 配置、README、docs 和 src 目录，任务完成。
 
                 Observation 摘要：
                 %s
                 """.formatted(firstLines(observation, 6)));
+    }
+
+    private static String listCommand() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        return os.contains("win") ? "dir /b" : "ls -la";
     }
 
     private static String firstLines(String text, int maxLines) {

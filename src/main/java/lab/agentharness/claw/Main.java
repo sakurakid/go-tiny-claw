@@ -3,14 +3,14 @@ package lab.agentharness.claw;
 import java.nio.file.Path;
 import java.util.logging.Logger;
 
-import lab.agentharness.engine.Loop;
+import lab.agentharness.engine.AgentEngine;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.provider.MockProvider;
 import lab.agentharness.tools.Registry;
 import lab.agentharness.tools.ToolRegistry;
 
 /**
- * CLI 启动入口，负责装配 MockProvider、ToolRegistry 和 Main Loop。
+ * CLI 启动入口，负责装配 MockProvider、ToolRegistry 和 AgentEngine。
  */
 public final class Main {
     private static final Logger LOG = Logger.getLogger(Main.class.getName());
@@ -24,15 +24,18 @@ public final class Main {
         // 1. 初始化模型 Provider（大脑）。Demo 阶段先用 Mock，不接真实 API。
         LLMProvider provider = new MockProvider();
 
-        // 2. 初始化 Tool Registry（手脚）。工具参数以 RawJson 原样传递，具体工具自己解析。
-        Registry registry = ToolRegistry.demoRegistry(Path.of("."));
+        // 2. 获取当前执行目录作为 WorkDir 物理边界。
+        Path workDir = Path.of("").toAbsolutePath().normalize();
 
-        // 3. 组装并启动核心 Main Loop（操作系统心脏）
-        Loop loop = new Loop(provider, registry);
+        // 3. 初始化 Tool Registry（手脚）。工具参数以 RawJson 原样传递，具体工具自己解析。
+        Registry registry = ToolRegistry.demoRegistry(workDir);
+
+        // 4. 实例化核心引擎（操作系统心脏）。
+        AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir);
 
         System.out.println("开始执行任务...");
         try {
-            loop.run("帮我检查一下当前目录下的 README.md，并总结这个项目现在主要做什么");
+            engine.run("帮我检查当前目录的文件");
         } catch (RuntimeException e) {
             LOG.severe("引擎运行崩溃: " + e.getMessage());
             throw e;

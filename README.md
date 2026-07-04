@@ -27,9 +27,9 @@ go-tiny-claw/
 │   └── main-loop-and-schema.md
 └── src/main/java/lab/agentharness/
     ├── claw/
-    │   └── Main.java              # Demo 入口，装配 MockProvider、ToolRegistry、Loop
+    │   └── Main.java              # Demo 入口，装配 MockProvider、ToolRegistry、AgentEngine
     ├── engine/
-    │   └── Loop.java              # Main Loop / ReAct 核心循环
+    │   └── AgentEngine.java       # Main Loop / ReAct 核心循环
     ├── provider/
     │   ├── LLMProvider.java       # LLM Provider 接口
     │   └── MockProvider.java      # 本地 Mock，模拟工具调用
@@ -55,13 +55,14 @@ java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
 
 ## 当前 Demo 会做什么
 
-1. `Main` 初始化 `MockProvider` 和 `ToolRegistry`。
-2. `Loop` 创建系统消息和用户任务。
-3. `MockProvider` 第一轮返回一个 `read_file` 的 `ToolCall`。
-4. `Loop` 不解析参数，只把 `RawJson` 交给 `ToolRegistry`。
-5. `ToolRegistry` 执行读取 `README.md`，返回 `ToolResult`。
-6. `Loop` 把工具结果作为 Observation 写回上下文。
-7. `MockProvider` 第二轮返回最终文本，任务结束。
+1. `Main` 获取当前目录作为 `WorkDir` 物理边界。
+2. `Main` 初始化 `MockProvider` 和 `ToolRegistry`。
+3. `AgentEngine` 创建系统消息和用户任务，形成 `contextHistory`。
+4. `MockProvider` 第一轮返回一个 `bash` 的 `ToolCall`。
+5. `AgentEngine` 不解析参数，只把 `RawJson` 交给 `ToolRegistry`。
+6. `ToolRegistry` 执行列目录命令，返回 `ToolResult`。
+7. `AgentEngine` 把工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
+8. `MockProvider` 第二轮返回最终文本，任务结束。
 
 ## 第 2 步：Provider 和 Tool 接口
 
@@ -70,10 +71,10 @@ java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
 - `LLMProvider`：定义 `generate(messages, availableTools)`，负责发起一次模型推理。
 - `Registry`：定义 `getAvailableTools()` 和 `execute(call)`，负责提供工具 Schema 并执行模型发起的工具调用。
 
-现在 `Loop` 只依赖这两个接口：
+现在 `AgentEngine` 只依赖这两个接口：
 
 ```java
-public Loop(LLMProvider provider, Registry tools)
+public AgentEngine(LLMProvider provider, Registry registry, Path workDir)
 ```
 
 这让后续替换真实 OpenAI / Claude Provider，或者扩展新的工具注册表时，不需要改 Main Loop。
