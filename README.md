@@ -31,11 +31,12 @@ go-tiny-claw/
     ├── engine/
     │   └── Loop.java              # Main Loop / ReAct 核心循环
     ├── provider/
-    │   ├── ModelProvider.java     # LLM Provider 接口
+    │   ├── LLMProvider.java       # LLM Provider 接口
     │   └── MockProvider.java      # 本地 Mock，模拟工具调用
     ├── schema/
     │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
     └── tools/
+        ├── Registry.java          # 工具注册表接口
         └── ToolRegistry.java      # 工具注册与分发，内含 demo 工具
 ```
 
@@ -61,6 +62,21 @@ java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
 5. `ToolRegistry` 执行读取 `README.md`，返回 `ToolResult`。
 6. `Loop` 把工具结果作为 Observation 写回上下文。
 7. `MockProvider` 第二轮返回最终文本，任务结束。
+
+## 第 2 步：Provider 和 Tool 接口
+
+在进入真正的 for 循环之前，Engine 不能直接依赖某个模型 SDK 或某个具体工具实现，所以当前项目先抽象了两个接口：
+
+- `LLMProvider`：定义 `generate(messages, availableTools)`，负责发起一次模型推理。
+- `Registry`：定义 `getAvailableTools()` 和 `execute(call)`，负责提供工具 Schema 并执行模型发起的工具调用。
+
+现在 `Loop` 只依赖这两个接口：
+
+```java
+public Loop(LLMProvider provider, Registry tools)
+```
+
+这让后续替换真实 OpenAI / Claude Provider，或者扩展新的工具注册表时，不需要改 Main Loop。
 
 ## 后续练习
 

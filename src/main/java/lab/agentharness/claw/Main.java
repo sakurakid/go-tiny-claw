@@ -4,8 +4,9 @@ import java.nio.file.Path;
 import java.util.logging.Logger;
 
 import lab.agentharness.engine.Loop;
+import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.provider.MockProvider;
-import lab.agentharness.provider.ModelProvider;
+import lab.agentharness.tools.Registry;
 import lab.agentharness.tools.ToolRegistry;
 
 /**
@@ -21,10 +22,10 @@ public final class Main {
         System.out.println("欢迎来到 go-tiny-claw Java Harness 引擎启动序列");
 
         // 1. 初始化模型 Provider（大脑）。Demo 阶段先用 Mock，不接真实 API。
-        ModelProvider provider = new MockProvider();
+        LLMProvider provider = new MockProvider();
 
         // 2. 初始化 Tool Registry（手脚）。工具参数以 RawJson 原样传递，具体工具自己解析。
-        ToolRegistry registry = ToolRegistry.demoRegistry(Path.of("."));
+        Registry registry = ToolRegistry.demoRegistry(Path.of("."));
 
         // 3. 组装并启动核心 Main Loop（操作系统心脏）
         Loop loop = new Loop(provider, registry);

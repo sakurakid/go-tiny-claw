@@ -4,9 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import lab.agentharness.provider.ModelProvider;
+import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.schema.Schema;
-import lab.agentharness.tools.ToolRegistry;
+import lab.agentharness.tools.Registry;
 
 /**
  * Main Loop / ReAct 核心循环，负责组装上下文、调用模型、执行工具并记录 Observation。
@@ -14,10 +14,10 @@ import lab.agentharness.tools.ToolRegistry;
 public final class Loop {
     private static final int MAX_TURNS = 4;
 
-    private final ModelProvider provider;
-    private final ToolRegistry tools;
+    private final LLMProvider provider;
+    private final Registry tools;
 
-    public Loop(ModelProvider provider, ToolRegistry tools) {
+    public Loop(LLMProvider provider, Registry tools) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.tools = Objects.requireNonNull(tools, "tools");
     }
@@ -36,7 +36,7 @@ public final class Loop {
             System.out.println("---- Turn " + turn + " ----");
             System.out.println("整理上下文与可用工具，调用模型 Provider: " + provider.name());
 
-            Schema.Message assistant = provider.complete(messages, tools.definitions());
+            Schema.Message assistant = provider.generate(messages, tools.getAvailableTools());
             messages.add(assistant);
             System.out.println("Assistant: " + assistant.content());
 

@@ -19,7 +19,7 @@ import lab.agentharness.schema.Schema;
 /**
  * 极简工具注册表，负责保存工具定义，并把模型发起的 ToolCall 分发到本地工具。
  */
-public final class ToolRegistry {
+public final class ToolRegistry implements Registry {
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
     public static ToolRegistry demoRegistry(Path workspace) {
@@ -33,10 +33,12 @@ public final class ToolRegistry {
         tools.put(tool.definition().name(), tool);
     }
 
-    public List<Schema.ToolDefinition> definitions() {
+    @Override
+    public List<Schema.ToolDefinition> getAvailableTools() {
         return tools.values().stream().map(Tool::definition).toList();
     }
 
+    @Override
     public Schema.ToolResult execute(Schema.ToolCall call) {
         Tool tool = tools.get(call.name());
         if (tool == null) {

@@ -75,6 +75,67 @@ Main Loop 不关心 `read_file` 需要 `path`，也不关心 `bash` 需要 `comm
 Reasoning -> Action -> Observation -> Reasoning
 ```
 
+## 第 2 步：抽象 Provider 和 Tool 接口
+
+在写 Main Loop 的 for 循环之前，需要先把两个边界抽出来：
+
+- 去哪里调用大模型。
+- 去哪里执行工具。
+
+Go 版本里会定义：
+
+```go
+type LLMProvider interface {
+    Generate(ctx context.Context, messages []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error)
+}
+```
+
+Java 版对应为：
+
+```java
+public interface LLMProvider {
+    String name();
+
+    Schema.Message generate(
+            List<Schema.Message> messages,
+            List<Schema.ToolDefinition> availableTools);
+}
+```
+
+Go 版本里的工具注册表接口是：
+
+```go
+type Registry interface {
+    GetAvailableTools() []schema.ToolDefinition
+    Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult
+}
+```
+
+Java 版对应为：
+
+```java
+public interface Registry {
+    List<Schema.ToolDefinition> getAvailableTools();
+
+    Schema.ToolResult execute(Schema.ToolCall call);
+}
+```
+
+当前 demo 先不引入 Java 版 `context.Context` 等价物，避免把练习项目做重。后续如果要支持取消、超时、trace id，可以再加一个很薄的 `RunContext` 参数。
+
+抽象之后，`Loop` 的构造函数只依赖接口：
+
+```java
+public Loop(LLMProvider provider, Registry tools)
+```
+
+这样 Main Loop 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只负责四件事：
+
+1. 组装上下文。
+2. 调用 `provider.generate(...)`。
+3. 判断是否有 `ToolCall`。
+4. 调用 `tools.execute(call)` 并记录 Observation。
+
 ## 为什么保持目录简单
 
 这个仓库现在只是练习 Demo，不需要提前做复杂封装。当前保留五个核心位置：

@@ -7,14 +7,14 @@ import lab.agentharness.schema.Schema;
 /**
  * 本地假模型实现，模拟“先调用工具，再根据 Observation 返回最终答案”的 ReAct 行为。
  */
-public final class MockProvider implements ModelProvider {
+public final class MockProvider implements LLMProvider {
     @Override
     public String name() {
         return "mock-provider";
     }
 
     @Override
-    public Schema.Message complete(List<Schema.Message> messages, List<Schema.ToolDefinition> tools) {
+    public Schema.Message generate(List<Schema.Message> messages, List<Schema.ToolDefinition> availableTools) {
         boolean hasObservation = messages.stream().anyMatch(message -> message.toolCallId() != null);
         if (!hasObservation) {
             Schema.ToolCall readReadme = new Schema.ToolCall(
