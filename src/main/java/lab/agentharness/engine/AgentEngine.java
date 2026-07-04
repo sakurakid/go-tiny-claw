@@ -65,7 +65,7 @@ public final class AgentEngine {
 
             if (enableThinking) {
                 LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
-                Schema.Message thinkResp = provider.generate(contextHistory, List.of());
+                Schema.Message thinkResp = provider.generate(thinkingContext(contextHistory), List.of());
                 if (thinkResp == null) {
                     throw new IllegalStateException("Thinking 阶段模型返回空消息。");
                 }
@@ -111,5 +111,16 @@ public final class AgentEngine {
 
     private static int bytes(String text) {
         return text == null ? 0 : text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static List<Schema.Message> thinkingContext(List<Schema.Message> contextHistory) {
+        List<Schema.Message> thinkingMessages = new ArrayList<>(contextHistory);
+        thinkingMessages.add(Schema.Message.user("""
+                【Thinking Phase 指令】
+                当前阶段只是暂时隐藏工具列表，不代表系统没有工具。
+                请只输出简短规划，不要说“没有工具”，不要编造工具名、命令、API 调用、观察结果或最终答案。
+                等待 Action Phase 恢复工具后，再根据可用工具采取行动。
+                """));
+        return thinkingMessages;
     }
 }
