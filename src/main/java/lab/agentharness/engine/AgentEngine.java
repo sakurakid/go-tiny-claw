@@ -21,15 +21,21 @@ public final class AgentEngine {
     private final LLMProvider provider;
     private final Registry registry;
     private final Path workDir;
+    private final boolean enableThinking;
 
-    public AgentEngine(LLMProvider provider, Registry registry, Path workDir) {
+    public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.workDir = Objects.requireNonNull(workDir, "workDir").toAbsolutePath().normalize();
+        this.enableThinking = enableThinking;
     }
 
-    public static AgentEngine newAgentEngine(LLMProvider provider, Registry registry, Path workDir) {
-        return new AgentEngine(provider, registry, workDir);
+    public static AgentEngine newAgentEngine(
+            LLMProvider provider,
+            Registry registry,
+            Path workDir,
+            boolean enableThinking) {
+        return new AgentEngine(provider, registry, workDir, enableThinking);
     }
 
     /**
@@ -37,6 +43,7 @@ public final class AgentEngine {
      */
     public void run(String userPrompt) {
         LOG.info("[Engine] 引擎启动，锁定工作区: " + workDir);
+        LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
 
         List<Schema.Message> contextHistory = new ArrayList<>();
         contextHistory.add(Schema.Message.system("""
@@ -54,27 +61,39 @@ public final class AgentEngine {
             }
 
             LOG.info("========== [Turn " + turnCount + "] 开始 ==========");
-
             List<Schema.ToolDefinition> availableTools = registry.getAvailableTools();
-            LOG.info("[Engine] 正在思考 (Reasoning)...");
 
-            Schema.Message responseMsg = provider.generate(contextHistory, availableTools);
-            if (responseMsg == null) {
-                throw new IllegalStateException("模型返回空消息。");
+            if (enableThinking) {
+                LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
+                Schema.Message thinkResp = provider.generate(contextHistory, List.of());
+                if (thinkResp == null) {
+                    throw new IllegalStateException("Thinking 阶段模型返回空消息。");
+                }
+
+                if (thinkResp.content() != null && !thinkResp.content().isBlank()) {
+                    System.out.println("内部思考 Trace: " + thinkResp.content());
+                    contextHistory.add(thinkResp);
+                }
             }
 
-            contextHistory.add(responseMsg);
-            if (responseMsg.content() != null && !responseMsg.content().isBlank()) {
-                System.out.println("模型: " + responseMsg.content());
+            LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
+            Schema.Message actionResp = provider.generate(contextHistory, availableTools);
+            if (actionResp == null) {
+                throw new IllegalStateException("Action 阶段模型返回空消息。");
             }
 
-            if (!responseMsg.hasToolCalls()) {
-                LOG.info("[Engine] 任务完成，退出循环。");
+            contextHistory.add(actionResp);
+            if (actionResp.content() != null && !actionResp.content().isBlank()) {
+                System.out.println("对外回复: " + actionResp.content());
+            }
+
+            if (!actionResp.hasToolCalls()) {
+                LOG.info("[Engine] 模型未请求调用工具，任务宣告完成。");
                 break;
             }
 
-            LOG.info("[Engine] 模型请求调用 " + responseMsg.toolCalls().size() + " 个工具...");
-            for (Schema.ToolCall toolCall : responseMsg.toolCalls()) {
+            LOG.info("[Engine] 模型请求调用 " + actionResp.toolCalls().size() + " 个工具...");
+            for (Schema.ToolCall toolCall : actionResp.toolCalls()) {
                 LOG.info("  -> 执行工具: " + toolCall.name() + ", 参数: " + toolCall.arguments());
 
                 Schema.ToolResult result = registry.execute(toolCall);

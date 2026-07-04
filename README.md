@@ -2,20 +2,7 @@
 
 一个用 Java 编写的 Agent Harness 练习 Demo。
 
-这个仓库参考 tiny-claw / claw 风格的 Go 项目结构，但实现语言使用 Java。当前目标不是做一个完整框架，而是用最少代码跑通 Harness 最核心的几件事：统一上下文协议、Main Loop、Provider 抽象、Tool Registry。
-
-## 当前重点
-
-这一步先实现系统的统一血液：`schema`。
-
-在 Harness 里，大模型、工具、主循环之间传递的数据都应该走同一套标准结构。不同模型厂商的 API 可以各不相同，但进入 go-tiny-claw 内部之后，都要被转换成自己的 `Message / ToolCall / ToolResult / ToolDefinition`。
-
-这样做的好处是：
-
-- Main Loop 不绑定 OpenAI 或 Claude 的具体 API 格式。
-- 工具参数用 `RawJson` 原样传递，Main Loop 不解析具体参数。
-- Provider 只负责把模型输出转换成内部 `Schema.Message`。
-- Tool Registry 只负责把 `ToolCall` 分发给具体工具。
+这个仓库参考 tiny-claw / claw 风格的 Go 项目结构，但实现语言使用 Java。当前目标不是做完整框架，而是用尽量少的代码跑通 Harness 最核心的几件事：统一 Schema、Provider 抽象、Tool Registry、Main Loop，以及慢思考模式。
 
 ## 项目结构
 
@@ -32,13 +19,48 @@ go-tiny-claw/
     │   └── AgentEngine.java       # Main Loop / ReAct 核心循环
     ├── provider/
     │   ├── LLMProvider.java       # LLM Provider 接口
-    │   └── MockProvider.java      # 本地 Mock，模拟工具调用
+    │   └── MockProvider.java      # 本地 Mock，模拟 Thinking 与 Action
     ├── schema/
     │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
     └── tools/
         ├── Registry.java          # 工具注册表接口
         └── ToolRegistry.java      # 工具注册与分发，内含 demo 工具
 ```
+
+## 当前实现
+
+- `Schema` 定义系统统一血液：`Message / ToolCall / ToolResult / ToolDefinition / RawJson`。
+- `LLMProvider` 抽象大模型调用：`generate(messages, availableTools)`。
+- `Registry` 抽象工具注册与分发：`getAvailableTools()` 和 `execute(call)`。
+- `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
+- `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
+
+## 慢思考模式
+
+`AgentEngine` 构造时可以打开慢思考：
+
+```java
+AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, true);
+```
+
+开启后，每一轮 Turn 会拆成两段：
+
+1. Phase 1 Thinking：传入空工具列表，模型看不到工具 Schema，只能输出规划。
+2. Phase 2 Action：恢复工具列表，模型基于刚才的规划发起工具调用或给出最终回复。
+
+这能模拟 Coding Agent 里的“先想清楚，再动手”。简单任务可以关闭它以减少 token，复杂代码任务可以打开它减少盲目工具调用。
+
+## 当前 Demo 会做什么
+
+1. `Main` 获取当前目录作为 `WorkDir` 物理边界。
+2. `Main` 初始化 `MockProvider` 和 `ToolRegistry`。
+3. `AgentEngine` 创建 `contextHistory`，写入 system message 和 user message。
+4. Turn 1 Thinking：`MockProvider` 输出内部规划。
+5. Turn 1 Action：`MockProvider` 请求调用 `bash` 列目录。
+6. `ToolRegistry` 执行命令，返回 `ToolResult`。
+7. `AgentEngine` 把工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
+8. Turn 2 Thinking：`MockProvider` 根据 Observation 规划总结。
+9. Turn 2 Action：`MockProvider` 返回最终文本，任务结束。
 
 ## 运行方式
 
@@ -53,35 +75,7 @@ mvn exec:java
 java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
 ```
 
-## 当前 Demo 会做什么
-
-1. `Main` 获取当前目录作为 `WorkDir` 物理边界。
-2. `Main` 初始化 `MockProvider` 和 `ToolRegistry`。
-3. `AgentEngine` 创建系统消息和用户任务，形成 `contextHistory`。
-4. `MockProvider` 第一轮返回一个 `bash` 的 `ToolCall`。
-5. `AgentEngine` 不解析参数，只把 `RawJson` 交给 `ToolRegistry`。
-6. `ToolRegistry` 执行列目录命令，返回 `ToolResult`。
-7. `AgentEngine` 把工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
-8. `MockProvider` 第二轮返回最终文本，任务结束。
-
-## 第 2 步：Provider 和 Tool 接口
-
-在进入真正的 for 循环之前，Engine 不能直接依赖某个模型 SDK 或某个具体工具实现，所以当前项目先抽象了两个接口：
-
-- `LLMProvider`：定义 `generate(messages, availableTools)`，负责发起一次模型推理。
-- `Registry`：定义 `getAvailableTools()` 和 `execute(call)`，负责提供工具 Schema 并执行模型发起的工具调用。
-
-现在 `AgentEngine` 只依赖这两个接口：
-
-```java
-public AgentEngine(LLMProvider provider, Registry registry, Path workDir)
-```
-
-这让后续替换真实 OpenAI / Claude Provider，或者扩展新的工具注册表时，不需要改 Main Loop。
-
 ## 后续练习
-
-接下来可以继续补：
 
 - 更真实的 ReAct 响应解析。
 - OpenAI / Claude Provider 适配。

@@ -1,22 +1,16 @@
 # Main Loop 与 Schema 设计笔记
 
-## 为什么先定义 Schema
+## 1. 统一血液：Schema
 
 在 Agent Harness 里，真正流动的数据不是某个框架对象，而是上下文。大模型、工具、主循环之间每一轮都在交换消息、工具调用和工具结果。
 
-市面上的模型 API 格式并不统一。Claude、OpenAI 兼容模型、本地模型都可能有自己的 message 和 tool call 结构。为了让 go-tiny-claw 内部保持稳定，需要先定义一套自己的标准数据结构。
-
-这个标准数据结构就是项目里的 `schema/Schema.java`。
-
-## Schema 是系统的统一血液
-
-当前 Java 版把 Go 示例里的 `message.go` 收敛到一个文件里：
+不同模型 API 格式并不统一。Claude、OpenAI 兼容模型、本地模型都可能有自己的 message 和 tool call 结构。为了让 go-tiny-claw 内部保持稳定，我们先定义自己的标准数据结构：
 
 ```text
 src/main/java/lab/agentharness/schema/Schema.java
 ```
 
-它包含：
+当前包含：
 
 - `Role`：消息角色，区分 system / user / assistant。
 - `Message`：上下文中的单条消息。
@@ -25,72 +19,16 @@ src/main/java/lab/agentharness/schema/Schema.java
 - `ToolDefinition`：暴露给模型看的工具定义。
 - `RawJson`：Java 版 `json.RawMessage`。
 
-## RawJson 的意义
+`RawJson` 的核心意义是延迟解析。Main Loop 只知道模型要调用哪个工具，以及参数是一段 JSON；具体字段由具体工具自己解析。
 
-Go 版本里使用 `json.RawMessage`，目的是延迟解析工具参数。Java 版用 `Schema.RawJson` 表达同样的思想。
+## 2. 抽象 Provider 和 Tool 接口
 
-Main Loop 只知道模型要调用哪个工具，以及参数是一段 JSON：
-
-```java
-new Schema.ToolCall(
-        "call_readme_001",
-        "read_file",
-        Schema.RawJson.of("{\"path\":\"README.md\"}"));
-```
-
-Main Loop 不关心 `read_file` 需要 `path`，也不关心 `bash` 需要 `command`。具体参数由具体工具自己解析。
-
-这样可以保持解耦：
-
-- Main Loop 负责调度。
-- Provider 负责模型适配。
-- Tool Registry 负责分发。
-- Tool 负责理解自己的参数。
-
-## 当前 Main Loop 流程
-
-当前 Demo 的流程是：
-
-```text
-接收用户任务
-  ↓
-初始化 Context：system message + user message
-  ↓
-调用 Provider
-  ↓
-解析 Provider 返回的 Schema.Message
-  ↓
-如果没有 ToolCall：返回最终结果
-  ↓
-如果有 ToolCall：交给 ToolRegistry 执行
-  ↓
-把 ToolResult 作为 Observation 写回上下文
-  ↓
-进入下一轮 Turn
-```
-
-这对应 ReAct 的最小循环：
-
-```text
-Reasoning -> Action -> Observation -> Reasoning
-```
-
-## 第 2 步：抽象 Provider 和 Tool 接口
-
-在写 Main Loop 的 for 循环之前，需要先把两个边界抽出来：
+在写 Main Loop 的循环之前，需要先抽出两个边界：
 
 - 去哪里调用大模型。
 - 去哪里执行工具。
 
-Go 版本里会定义：
-
-```go
-type LLMProvider interface {
-    Generate(ctx context.Context, messages []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error)
-}
-```
-
-Java 版对应为：
+Java 版 Provider 接口：
 
 ```java
 public interface LLMProvider {
@@ -102,16 +40,7 @@ public interface LLMProvider {
 }
 ```
 
-Go 版本里的工具注册表接口是：
-
-```go
-type Registry interface {
-    GetAvailableTools() []schema.ToolDefinition
-    Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult
-}
-```
-
-Java 版对应为：
+Java 版工具注册表接口：
 
 ```java
 public interface Registry {
@@ -121,45 +50,68 @@ public interface Registry {
 }
 ```
 
-当前 demo 先不引入 Java 版 `context.Context` 等价物，避免把练习项目做重。后续如果要支持取消、超时、trace id，可以再加一个很薄的 `RunContext` 参数。
-
-抽象之后，`AgentEngine` 的构造函数只依赖接口和 WorkDir：
+这样 `AgentEngine` 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只依赖接口和 WorkDir：
 
 ```java
-public AgentEngine(LLMProvider provider, Registry registry, Path workDir)
+public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking)
 ```
 
-这样 Main Loop 不知道背后是真实 LLM SDK、MockProvider、本地模型，还是哪种工具注册表。它只负责五件事：
+## 3. 最终 Main Loop
 
-1. 组装上下文。
-2. 调用 `provider.generate(...)`。
-3. 判断是否有 `ToolCall`。
-4. 调用 `tools.execute(call)` 并记录 Observation。
-5. 用 `WorkDir` 标记 Agent 的物理工作边界。
-
-## 最终 Main Loop
-
-当前 `engine/AgentEngine.java` 对齐 Go 示例里的 `AgentEngine`：
+`engine/AgentEngine.java` 对齐 Go 示例里的 `AgentEngine`：
 
 - `provider`：大模型接口，对应大脑。
 - `registry`：工具注册表接口，对应手脚。
 - `workDir`：工作区物理边界，避免 Agent 没有活动范围。
+- `enableThinking`：慢思考模式开关。
 
-`run(userPrompt)` 做的事情是：
+`run(userPrompt)` 做的事情：
 
 1. 打印引擎启动日志，并锁定 `workDir`。
 2. 初始化 `contextHistory`，写入 system message 和 user message。
 3. 进入 while 循环，并用 `MAX_TURNS` 防止 Doom Loop。
 4. 每轮获取 `registry.getAvailableTools()`。
-5. 调用 `provider.generate(contextHistory, availableTools)`。
-6. 将模型响应完整追加回上下文。
+5. 如果开启慢思考，先进入 Thinking Phase。
+6. 恢复工具后进入 Action Phase。
 7. 如果模型没有工具调用，说明任务完成，退出循环。
 8. 如果模型请求工具调用，逐个执行 `registry.execute(toolCall)`。
 9. 将工具返回封装成 `Schema.Message.observation(toolCall.id(), result.output())` 写回上下文。
 
-这里最重要的是 Observation 必须携带 `ToolCallID`。它是模型在下一轮推理时关联“刚才那个 Action”和“工具返回结果”的线索。
+Observation 必须携带 `ToolCallID`。它是模型在下一轮推理时关联“刚才那个 Action”和“工具返回结果”的线索。
 
-## 为什么保持目录简单
+## 4. 慢思考模式
+
+慢思考模式把一轮 Turn 拆成两个阶段。
+
+Phase 1：Thinking
+
+```java
+Schema.Message thinkResp = provider.generate(contextHistory, List.of());
+```
+
+这里传入空工具列表，相当于剥夺工具访问权。模型看不到任何工具 Schema，只能输出规划或思考过程。
+
+Phase 2：Action
+
+```java
+Schema.Message actionResp = provider.generate(contextHistory, availableTools);
+```
+
+这时恢复工具列表。模型会顺着刚才追加到上下文里的 thinking trace，决定是否发起工具调用。
+
+当前 `MockProvider` 的验证逻辑是：
+
+- 如果 `availableTools` 为空，返回一段内部思考。
+- 如果 `availableTools` 非空且还没有 Observation，返回一个 `bash` ToolCall。
+- 如果已经有 Observation，返回最终结果。
+
+这让 demo 能展示完整链路：
+
+```text
+Thinking -> Action -> Observation -> Thinking -> Final Answer
+```
+
+## 5. 为什么保持目录简单
 
 这个仓库现在只是练习 Demo，不需要提前做复杂封装。当前保留五个核心位置：
 
@@ -168,5 +120,3 @@ public AgentEngine(LLMProvider provider, Registry registry, Path workDir)
 - `provider`：模型接口。
 - `schema`：统一协议。
 - `tools`：工具注册与分发。
-
-等这条链路跑通之后，再考虑拆出 context、memory、middleware、feishu 等模块会更自然。

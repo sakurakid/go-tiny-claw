@@ -30,8 +30,8 @@ public final class Main {
         // 3. 初始化 Tool Registry（手脚）。工具参数以 RawJson 原样传递，具体工具自己解析。
         Registry registry = ToolRegistry.demoRegistry(workDir);
 
-        // 4. 实例化核心引擎（操作系统心脏）。
-        AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir);
+        // 4. 实例化核心引擎（操作系统心脏），开启慢思考模式。
+        AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, true);
 
         System.out.println("开始执行任务...");
         try {

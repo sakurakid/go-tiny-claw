@@ -12,6 +12,7 @@ public interface LLMProvider {
 
     /**
      * 接收当前上下文历史和可用工具列表，并发起一次模型推理。
+     * availableTools 为空时表示 Thinking Phase，模型只能输出规划，不应请求工具。
      */
     Schema.Message generate(List<Schema.Message> messages, List<Schema.ToolDefinition> availableTools);
 }

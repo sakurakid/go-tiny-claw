@@ -15,7 +15,18 @@ public final class MockProvider implements LLMProvider {
 
     @Override
     public Schema.Message generate(List<Schema.Message> messages, List<Schema.ToolDefinition> availableTools) {
+        boolean thinkingPhase = availableTools == null || availableTools.isEmpty();
         boolean hasObservation = messages.stream().anyMatch(message -> message.toolCallId() != null);
+
+        if (thinkingPhase) {
+            if (hasObservation) {
+                return Schema.Message.assistant("【推理中】我已经拿到了工具 Observation，下一步应该直接总结结果并结束任务。");
+            }
+
+            return Schema.Message.assistant(
+                    "【推理中】目标是检查当前目录文件。我不能直接盲猜，需要先调用 bash 工具列出工作区文件，再根据 Observation 总结。");
+        }
+
         if (!hasObservation) {
             Schema.ToolCall listFiles = new Schema.ToolCall(
                     "call_list_files_001",
@@ -23,7 +34,7 @@ public final class MockProvider implements LLMProvider {
                     Schema.RawJson.of("{\"command\":\"" + listCommand() + "\"}"));
 
             return Schema.Message.assistant(
-                    "让我来看看当前工作区下有什么文件。",
+                    "我要执行刚才计划的步骤，调用 bash 查看当前工作区文件。",
                     List.of(listFiles));
         }
 
