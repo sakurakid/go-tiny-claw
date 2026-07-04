@@ -14,12 +14,15 @@ go-tiny-claw/
 │   └── main-loop-and-schema.md
 └── src/main/java/lab/agentharness/
     ├── claw/
-    │   └── Main.java              # Demo 入口，装配 MockProvider、ToolRegistry、AgentEngine
+    │   ├── Main.java              # Demo 入口，装配 MockProvider、ToolRegistry、AgentEngine
+    │   └── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
     ├── engine/
     │   └── AgentEngine.java       # Main Loop / ReAct 核心循环
     ├── provider/
-    │   ├── LLMProvider.java       # LLM Provider 接口
-    │   └── MockProvider.java      # 本地 Mock，模拟 Thinking 与 Action
+    │   ├── AnthropicCompatibleProvider.java # Anthropic-compatible 协议适配器
+    │   ├── LLMProvider.java                 # LLM Provider 接口
+    │   ├── MockProvider.java                # 本地 Mock，模拟 Thinking 与 Action
+    │   └── OpenAICompatibleProvider.java    # OpenAI-compatible 协议适配器
     ├── schema/
     │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
     └── tools/
@@ -34,6 +37,8 @@ go-tiny-claw/
 - `Registry` 抽象工具注册与分发：`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
+- `OpenAICompatibleProvider` 支持 DeepSeek / 智谱等 OpenAI-compatible 服务。
+- `AnthropicCompatibleProvider` 支持 Claude / 兼容 Anthropic Messages API 的服务。
 
 ## 慢思考模式
 
@@ -73,6 +78,29 @@ mvn exec:java
 
 ```bash
 java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
+```
+
+## Provider 冒烟测试
+
+真实模型调用不走 Mock，可以用 `ProviderSmokeTest`：
+
+```bash
+# DeepSeek，默认 model=deepseek-chat
+set DEEPSEEK_API_KEY=你的 key
+set CLAW_PROVIDER=deepseek
+mvn -q -Dmain.class=lab.agentharness.claw.ProviderSmokeTest -Dexec.args="北京天气怎么样？" exec:java
+
+# 智谱 OpenAI-compatible，默认 model=glm-4-flash
+set ZHIPU_API_KEY=你的 key
+set CLAW_PROVIDER=zhipu
+mvn -q -Dmain.class=lab.agentharness.claw.ProviderSmokeTest -Dexec.args="你好，介绍一下你自己" exec:java
+```
+
+也可以通过环境变量覆盖模型名：
+
+```bash
+set DEEPSEEK_MODEL=deepseek-chat
+set ZHIPU_MODEL=glm-4-flash
 ```
 
 ## 后续练习

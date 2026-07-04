@@ -120,3 +120,40 @@ Thinking -> Action -> Observation -> Thinking -> Final Answer
 - `provider`：模型接口。
 - `schema`：统一协议。
 - `tools`：工具注册与分发。
+
+## 6. 模型接入层：双协议 Provider
+
+Java 侧可以直接使用官方 SDK：
+
+- OpenAI Java SDK：`com.openai:openai-java`
+- Anthropic Java SDK：`com.anthropic:anthropic-java`
+
+当前 demo 为了保持简单，没有先绑定 SDK 类型，而是实现了两个轻量协议适配器：
+
+- `OpenAICompatibleProvider`：适配 OpenAI Chat Completions 兼容协议。
+- `AnthropicCompatibleProvider`：适配 Anthropic Messages 兼容协议。
+
+这样做的原因是：我们项目内部已经有了统一的 `Schema.Message / ToolCall / ToolDefinition`，Provider 层只需要做双向翻译：
+
+```text
+go-tiny-claw Schema -> 厂商 API Request
+厂商 API Response -> go-tiny-claw Schema
+```
+
+OpenAI-compatible 当前支持：
+
+- DeepSeek：`DEEPSEEK_API_KEY`，默认模型 `deepseek-chat`
+- 智谱：`ZHIPU_API_KEY`，默认模型 `glm-4-flash`
+
+Anthropic-compatible 当前预留：
+
+- Claude：`ANTHROPIC_API_KEY`
+- 智谱 Claude-compatible：`ZHIPU_API_KEY`
+
+冒烟测试入口：
+
+```text
+src/main/java/lab/agentharness/claw/ProviderSmokeTest.java
+```
+
+它不挂载工具，只发起一次纯模型请求，适合验证 key、base url、model 和消息翻译是否正常。
