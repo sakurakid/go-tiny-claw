@@ -78,18 +78,17 @@ AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, tru
 
 ## 运行方式
 
+项目会优先读取系统环境变量，其次读取本地 `.env.local`。`.env.local` 不会提交到 Git。
+
+本机已经可以直接使用 `.env.local` 运行；其他机器可参考 `.env.local.example` 创建自己的本地配置。
+
 ```bash
-# 智谱
-set ZHIPU_API_KEY=你的 key
-set CLAW_PROVIDER=zhipu
-
-# 或 DeepSeek
-set DEEPSEEK_API_KEY=你的 key
-set CLAW_PROVIDER=deepseek
-
-mvn clean package
-mvn exec:java
+mvn compile exec:java
 ```
+
+`mvn compile exec:java` 的含义是：先编译 Java 源码，再通过 Maven 的 exec 插件启动 `lab.agentharness.claw.Main`，并自动带上项目依赖 classpath。它不是打 jar，也不是运行 jar。
+
+如果已经编译过，也可以直接在 IDE 中点击 [Main.java](src/main/java/lab/agentharness/claw/Main.java) 的 `main` 方法运行。
 
 ## Provider 冒烟测试
 

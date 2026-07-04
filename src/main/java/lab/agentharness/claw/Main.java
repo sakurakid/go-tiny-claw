@@ -3,6 +3,7 @@ package lab.agentharness.claw;
 import java.nio.file.Path;
 import java.util.logging.Logger;
 
+import lab.agentharness.config.AppConfig;
 import lab.agentharness.engine.AgentEngine;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.provider.OpenAICompatibleProvider;
@@ -54,17 +55,12 @@ public final class Main {
     }
 
     private static LLMProvider providerFromEnv() {
-        String providerName = env("CLAW_PROVIDER", hasText(System.getenv("ZHIPU_API_KEY")) ? "zhipu" : "deepseek");
+        String providerName = AppConfig.get("CLAW_PROVIDER", hasText(AppConfig.get("ZHIPU_API_KEY")) ? "zhipu" : "deepseek");
         return switch (providerName.toLowerCase()) {
-            case "zhipu", "zhipu-openai" -> OpenAICompatibleProvider.newZhipuProvider(env("ZHIPU_MODEL", "glm-4.5-air"));
-            case "deepseek" -> OpenAICompatibleProvider.newDeepSeekProvider(env("DEEPSEEK_MODEL", "deepseek-v4-flash"));
+            case "zhipu", "zhipu-openai" -> OpenAICompatibleProvider.newZhipuProvider(AppConfig.get("ZHIPU_MODEL", "glm-4.5-air"));
+            case "deepseek" -> OpenAICompatibleProvider.newDeepSeekProvider(AppConfig.get("DEEPSEEK_MODEL", "deepseek-v4-flash"));
             default -> throw new IllegalArgumentException("未知 Provider: " + providerName);
         };
-    }
-
-    private static String env(String key, String defaultValue) {
-        String value = System.getenv(key);
-        return hasText(value) ? value : defaultValue;
     }
 
     private static boolean hasText(String value) {

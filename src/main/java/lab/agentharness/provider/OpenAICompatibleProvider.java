@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import lab.agentharness.config.AppConfig;
 import lab.agentharness.schema.Schema;
 
 /**
@@ -42,7 +43,7 @@ public final class OpenAICompatibleProvider implements LLMProvider {
     public static OpenAICompatibleProvider newDeepSeekProvider(String model) {
         return new OpenAICompatibleProvider(
                 "deepseek-openai-compatible",
-                System.getenv("DEEPSEEK_API_KEY"),
+                AppConfig.get("DEEPSEEK_API_KEY"),
                 "https://api.deepseek.com",
                 model);
     }
@@ -50,7 +51,7 @@ public final class OpenAICompatibleProvider implements LLMProvider {
     public static OpenAICompatibleProvider newZhipuProvider(String model) {
         return new OpenAICompatibleProvider(
                 "zhipu-openai-compatible",
-                System.getenv("ZHIPU_API_KEY"),
+                AppConfig.get("ZHIPU_API_KEY"),
                 "https://open.bigmodel.cn/api/paas/v4",
                 model);
     }

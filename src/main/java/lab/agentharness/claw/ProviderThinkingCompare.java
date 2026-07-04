@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.logging.Logger;
 
+import lab.agentharness.config.AppConfig;
 import lab.agentharness.engine.AgentEngine;
 import lab.agentharness.provider.AnthropicCompatibleProvider;
 import lab.agentharness.provider.LLMProvider;
@@ -22,7 +23,7 @@ public final class ProviderThinkingCompare {
     }
 
     public static void main(String[] args) {
-        String providerName = env("CLAW_PROVIDER", "deepseek");
+        String providerName = AppConfig.get("CLAW_PROVIDER", "deepseek");
         String prompt = args.length == 0
                 ? "我想去北京跑步，帮我查查天气适合吗？"
                 : String.join(" ", args);
@@ -52,17 +53,12 @@ public final class ProviderThinkingCompare {
 
     private static LLMProvider provider(String providerName) {
         return switch (providerName.toLowerCase()) {
-            case "deepseek" -> OpenAICompatibleProvider.newDeepSeekProvider(env("DEEPSEEK_MODEL", "deepseek-v4-flash"));
-            case "zhipu", "zhipu-openai" -> OpenAICompatibleProvider.newZhipuProvider(env("ZHIPU_MODEL", "glm-4-flash"));
-            case "claude", "anthropic" -> AnthropicCompatibleProvider.newClaudeProvider(env("ANTHROPIC_MODEL", "claude-sonnet-4-5"));
-            case "zhipu-claude", "zhipu-anthropic" -> AnthropicCompatibleProvider.newZhipuClaudeProvider(env("ZHIPU_CLAUDE_MODEL", "glm-4.5"));
+            case "deepseek" -> OpenAICompatibleProvider.newDeepSeekProvider(AppConfig.get("DEEPSEEK_MODEL", "deepseek-v4-flash"));
+            case "zhipu", "zhipu-openai" -> OpenAICompatibleProvider.newZhipuProvider(AppConfig.get("ZHIPU_MODEL", "glm-4-flash"));
+            case "claude", "anthropic" -> AnthropicCompatibleProvider.newClaudeProvider(AppConfig.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"));
+            case "zhipu-claude", "zhipu-anthropic" -> AnthropicCompatibleProvider.newZhipuClaudeProvider(AppConfig.get("ZHIPU_CLAUDE_MODEL", "glm-4.5"));
             default -> throw new IllegalArgumentException("未知 Provider: " + providerName);
         };
-    }
-
-    private static String env(String key, String defaultValue) {
-        String value = System.getenv(key);
-        return value == null || value.isBlank() ? defaultValue : value;
     }
 
     /**

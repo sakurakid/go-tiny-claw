@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import lab.agentharness.config.AppConfig;
 import lab.agentharness.schema.Schema;
 
 /**
@@ -42,7 +43,7 @@ public final class AnthropicCompatibleProvider implements LLMProvider {
     public static AnthropicCompatibleProvider newClaudeProvider(String model) {
         return new AnthropicCompatibleProvider(
                 "anthropic-compatible",
-                System.getenv("ANTHROPIC_API_KEY"),
+                AppConfig.get("ANTHROPIC_API_KEY"),
                 "https://api.anthropic.com/v1",
                 model);
     }
@@ -50,7 +51,7 @@ public final class AnthropicCompatibleProvider implements LLMProvider {
     public static AnthropicCompatibleProvider newZhipuClaudeProvider(String model) {
         return new AnthropicCompatibleProvider(
                 "zhipu-anthropic-compatible",
-                System.getenv("ZHIPU_API_KEY"),
+                AppConfig.get("ZHIPU_API_KEY"),
                 "https://open.bigmodel.cn/api/paas/v4",
                 model);
     }
