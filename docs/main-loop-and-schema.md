@@ -91,6 +91,8 @@ public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolea
 
 Observation 必须携带 `ToolCallID`。它是模型在下一轮推理时关联“刚才那个 Action”和“工具返回结果”的线索。
 
+当前 system message 还加入了一条轻量 Harness 边界：如果用户没有明确要求，不安装软件、不下载远程产物、不修改系统级配置。真实测试中模型发现本机缺 Go 后曾尝试安装 Go，这正是 bash 能力过强时容易出现的边界扩张；所以缺运行时应该如实报告，而不是自行安装。
+
 ## 4. 慢思考模式
 
 慢思考模式把一轮 Turn 拆成两个阶段。
@@ -133,14 +135,16 @@ Thinking -> Action -> Observation -> Thinking -> Final Answer
 - `schema`：统一协议。
 - `tools`：工具注册与分发。
 
-## 6. 动态 Registry 与 read_file 工具
+## 6. 动态 Registry 与极简工具集
 
-这一步开始，工具层不再把 demo 工具藏在注册表内部，而是拆成三块：
+这一步开始，工具层不再把 demo 工具藏在注册表内部，而是拆成独立工具类：
 
 ```text
 src/main/java/lab/agentharness/tools/BaseTool.java
 src/main/java/lab/agentharness/tools/ToolRegistry.java
 src/main/java/lab/agentharness/tools/ReadFileTool.java
+src/main/java/lab/agentharness/tools/WriteFileTool.java
+src/main/java/lab/agentharness/tools/BashTool.java
 ```
 
 `ToolRegistry` 只做三件事：
@@ -154,7 +158,24 @@ src/main/java/lab/agentharness/tools/ReadFileTool.java
 - 路径边界：模型只能读取 `WorkDir` 内部文件，不能通过 `../` 跳出工作区。
 - 内容截断：最多返回前 8000 字节，避免读取大日志导致上下文失控。
 
-当前 `Main` 会挂载 `ReadFileTool`，并要求模型读取项目根目录下的 `hello.txt`。这能验证真实 ToolCall、真实文件 IO 和 Observation 回写是否跑通。
+`WriteFileTool` 是改变文件系统的工具：
+
+- 路径边界：写入目标必须仍在 `WorkDir` 内。
+- 自动建目录：父目录不存在时自动创建。
+- 覆盖写入：当前 demo 采用 create-or-replace，后续可以接入审批或 diff 确认。
+
+`BashTool` 是改变运行环境的工具：
+
+- 工作目录绑定：命令默认在 `WorkDir` 内执行。
+- 时间预算：最多执行 30 秒，避免模型启动常驻服务后卡死主循环。
+- 错误回传：非 0 退出不会让 Java 程序崩溃，而是把 exit code 和输出作为 Observation 返回，让模型自己分析报错并自我修正。
+- 输出截断：最多返回前 8000 字节，避免命令输出撑爆上下文。
+
+为什么可以这样做：Harness 不替模型理解 shell 语法，也不在 Java 里重新实现管道、重定向或 `&&`。它只把模型提出的命令交给操作系统的 shell 执行：Windows 下使用 `cmd.exe /c`，macOS/Linux 下使用 `bash -lc`。这样模型获得了组合本地能力的通用接口，而 Harness 负责给这个接口加上工作目录、时间和输出边界。
+
+注意：`BashTool` 的 `workDir` 不是强沙箱。命令本身仍然可能通过 `cd` 或绝对路径访问工作区外部资源。真正的高危命令拦截、目录逃逸审计和人工审批应该放到后续 Middleware/Interceptors 层，而不是让基础工具类无限膨胀。
+
+当前 `Main` 会挂载 `read_file / write_file / bash`，并要求模型完成一个连续物理任务：查看 Go 版本、写入 `helloworld.go`、再编译运行。
 
 ## 7. 模型接入层：双协议 Provider
 

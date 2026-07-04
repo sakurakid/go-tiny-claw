@@ -28,9 +28,11 @@ go-tiny-claw/
     │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
     └── tools/
         ├── BaseTool.java          # 所有本地工具的统一接口
+        ├── BashTool.java          # 以 WorkDir 为默认目录执行终端命令
         ├── ReadFileTool.java      # 读取工作区文件的真实工具
         ├── Registry.java          # 工具注册表接口
-        └── ToolRegistry.java      # 动态工具注册与分发
+        ├── ToolRegistry.java      # 动态工具注册与分发
+        └── WriteFileTool.java     # 创建或覆盖写入工作区文件
 ```
 
 ## 当前实现
@@ -43,7 +45,9 @@ go-tiny-claw/
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
 - `OpenAICompatibleProvider` 支持 DeepSeek / 智谱等 OpenAI-compatible 服务。
 - `AnthropicCompatibleProvider` 支持 Claude / 兼容 Anthropic Messages API 的服务。
-- `ReadFileTool` 是第一个真实物理工具：读取 `WorkDir` 内文件，并做路径边界校验与 8000 字节截断。
+- `ReadFileTool` 读取 `WorkDir` 内文件，并做路径边界校验与 8000 字节截断。
+- `WriteFileTool` 创建或覆盖写入 `WorkDir` 内文件，并自动创建父目录。
+- `BashTool` 以 `WorkDir` 为默认目录执行终端命令，带 30 秒超时、非 0 退出回传和 8000 字节截断。
 
 ## 慢思考模式
 
@@ -65,11 +69,12 @@ AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, tru
 1. `Main` 获取当前目录作为 `WorkDir` 物理边界。
 2. `Main` 初始化真实 Provider 和 `ToolRegistry`。
 3. `AgentEngine` 创建 `contextHistory`，写入 system message 和 user message。
-4. `ToolRegistry` 挂载真实 `ReadFileTool`。
-5. 模型需要调用 `read_file` 读取 `hello.txt`。
-6. `ToolRegistry` 路由到 `ReadFileTool`，返回真实文件内容。
-7. `AgentEngine` 把工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
-8. 模型根据 Observation 用一句话总结文件内容，任务结束。
+4. `ToolRegistry` 挂载 `read_file / write_file / bash` 极简工具集。
+5. 模型用 `bash` 查看 Go 版本。
+6. 模型用 `write_file` 写入 `helloworld.go`。
+7. 模型用 `bash` 编译并运行 `helloworld.go`。
+8. `AgentEngine` 把每次工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
+9. 模型根据 Observation 总结任务是否完成。
 
 ## 运行方式
 

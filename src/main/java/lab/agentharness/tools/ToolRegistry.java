@@ -23,6 +23,8 @@ public final class ToolRegistry implements Registry {
     public static ToolRegistry demoRegistry(java.nio.file.Path workspace) {
         ToolRegistry registry = newRegistry();
         registry.register(new ReadFileTool(workspace));
+        registry.register(new WriteFileTool(workspace));
+        registry.register(new BashTool(workspace));
         return registry;
     }
 

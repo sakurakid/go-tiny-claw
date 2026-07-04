@@ -50,6 +50,8 @@ public final class AgentEngine {
                 You are go-tiny-claw, an expert coding assistant.
                 You can use tools inside the workspace, but must respect the WorkDir boundary.
                 Think step by step, call tools when needed, and stop when the task is complete.
+                Do not install software, download remote artifacts, or change system-level configuration unless the user explicitly asks.
+                If a required runtime is missing, report the limitation instead of trying to install it.
                 """));
         contextHistory.add(Schema.Message.user(userPrompt));
 

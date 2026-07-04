@@ -6,7 +6,6 @@ import java.util.logging.Logger;
 import lab.agentharness.engine.AgentEngine;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.provider.OpenAICompatibleProvider;
-import lab.agentharness.tools.ReadFileTool;
 import lab.agentharness.tools.Registry;
 import lab.agentharness.tools.ToolRegistry;
 
@@ -28,15 +27,20 @@ public final class Main {
         // 2. 初始化真实的大脑。默认优先智谱；也可以设置 CLAW_PROVIDER=deepseek 切到 DeepSeek。
         LLMProvider provider = providerFromEnv();
 
-        // 3. 初始化真实的 Tool Registry，并挂载 read_file 工具。
-        Registry registry = ToolRegistry.newRegistry();
-        registry.register(new ReadFileTool(workDir));
+        // 3. 初始化真实的 Tool Registry，并挂载 read_file/write_file/bash 极简工具集。
+        Registry registry = ToolRegistry.demoRegistry(workDir);
 
-        // 4. 实例化核心引擎。读取单个文件是简单任务，先关闭慢思考以减少一次模型调用。
+        // 4. 实例化核心引擎。这里关闭慢思考，体验 YOLO 急速模式。
         AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, false);
 
         String prompt = args.length == 0
-                ? "请调用工具读取一下当前工作区目录下 hello.txt 文件的内容，并用一句话向我总结它说了什么。"
+                ? """
+                请帮我执行以下操作：
+                1. 用 bash 查看一下我当前电脑的 Go 版本。
+                2. 帮我写一个简单的 helloworld.go 文件，输出 "Hello, go-tiny-claw!"。
+                3. 如果 Go 已安装，用 bash 编译并运行这个 go 文件，确认它能正常工作。
+                4. 如果 Go 未安装，请直接说明无法在本机确认编译运行；不要安装软件、不要下载依赖、不要修改系统环境。
+                """
                 : String.join(" ", args);
         System.out.println("开始执行任务...");
         try {
