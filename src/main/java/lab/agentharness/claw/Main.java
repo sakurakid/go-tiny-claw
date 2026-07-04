@@ -25,7 +25,7 @@ public final class Main {
         // 1. 获取当前执行目录作为 WorkDir 物理边界。
         Path workDir = Path.of("").toAbsolutePath().normalize();
 
-        // 2. 初始化真实的大脑。默认优先智谱；也可以设置 CLAW_PROVIDER=deepseek 切到 DeepSeek。
+        // 2. 初始化真实的大脑。优先读取系统环境变量，其次读取本地 .env.local。
         LLMProvider provider = providerFromEnv();
 
         // 3. 初始化真实的 Tool Registry，并挂载 read_file/write_file/bash 极简工具集。
@@ -35,13 +35,7 @@ public final class Main {
         AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, false);
 
         String prompt = args.length == 0
-                ? """
-                请帮我执行以下操作：
-                1. 用 bash 查看一下我当前电脑的 Java 版本。
-                2. 帮我写一个简单的 HelloWorld.java 文件，输出 "Hello, Java-tiny-claw!"。
-                3. 用 bash 编译并运行这个 Java 文件，确认它能正常工作。
-                4. 不要安装软件、不要下载依赖、不要修改系统环境；如果本机 Java 工具不可用，请直接说明限制。
-                """
+                ? "请帮我执行以下操作： 1. 用 bash 查看一下我当前电脑的 Java 和 Python 版本。 2. 帮我写一个简单的 HelloWorld111.java 文件，输出 \"Hello, Java-tiny-claw哈哈哈哈哈!\"。 3. 用 bash 编译并运行这个 Java 文件，确认它能正常工作。"
                 : String.join(" ", args);
         System.out.println("开始执行任务...");
         try {
