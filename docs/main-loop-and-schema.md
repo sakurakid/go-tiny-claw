@@ -144,6 +144,7 @@ src/main/java/lab/agentharness/tools/BaseTool.java
 src/main/java/lab/agentharness/tools/ToolRegistry.java
 src/main/java/lab/agentharness/tools/ReadFileTool.java
 src/main/java/lab/agentharness/tools/WriteFileTool.java
+src/main/java/lab/agentharness/tools/EditFileTool.java
 src/main/java/lab/agentharness/tools/BashTool.java
 ```
 
@@ -164,6 +165,15 @@ src/main/java/lab/agentharness/tools/BashTool.java
 - 自动建目录：父目录不存在时自动创建。
 - 覆盖写入：当前 demo 采用 create-or-replace，后续可以接入审批或 diff 确认。
 
+`EditFileTool` 是更适合 Coding Agent 的局部修改工具：
+
+- 唯一匹配：`old_text` 精确匹配多处时直接报错，要求模型提供更多上下文。
+- 换行容错：将 CRLF 归一化为 LF 后再尝试匹配。
+- 首尾空白容错：忽略 `old_text` 首尾空白后重试。
+- 缩进容错：逐行 trim 后用滑动窗口寻找唯一代码块。
+
+`edit_file` 的错误信息会原样通过 `ToolResult` 回到模型。比如“匹配到了多处”或“未找到 old_text”，模型下一轮可以先 `read_file`，再提供更精确的上下文重试。
+
 `BashTool` 是改变运行环境的工具：
 
 - 工作目录绑定：命令默认在 `WorkDir` 内执行。
@@ -175,7 +185,7 @@ src/main/java/lab/agentharness/tools/BashTool.java
 
 注意：`BashTool` 的 `workDir` 不是强沙箱。命令本身仍然可能通过 `cd` 或绝对路径访问工作区外部资源。真正的高危命令拦截、目录逃逸审计和人工审批应该放到后续 Middleware/Interceptors 层，而不是让基础工具类无限膨胀。
 
-当前 `Main` 会挂载 `read_file / write_file / bash`，并要求模型完成一个连续物理任务：查看 Java 版本、写入 `HelloWorld.java`、再编译运行。
+当前 `Main` 会挂载 `read_file / write_file / edit_file / bash`，并要求模型完成一个连续物理任务：读取 `EditTarget.java`、局部替换方法返回值、再编译运行验证。
 
 ## 7. 模型接入层：双协议 Provider
 

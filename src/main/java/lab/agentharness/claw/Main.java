@@ -35,7 +35,12 @@ public final class Main {
         AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, false);
 
         String prompt = args.length == 0
-                ? "请帮我执行以下操作： 1. 用 bash 查看一下我当前电脑的 Java 和 Python 版本。 2. 帮我写一个简单的 HelloWorld111.java 文件，输出 \"Hello, Java-tiny-claw哈哈哈哈哈!\"。 3. 用 bash 编译并运行这个 Java 文件，确认它能正常工作。"
+                ? """
+                请帮我执行以下操作：
+                1. 先用 read_file 读取当前工作区根目录下的 EditTarget.java。
+                2. 用 edit_file 做局部替换，不要重写整个文件：把 Greeter.message() 方法里的返回字符串从 "Hello from original edit target." 改成 "Hello from edit_file tool!"。
+                3. 用 bash 执行 javac EditTarget.java && java EditTarget，确认输出已经变成 Hello from edit_file tool!。
+                """
                 : String.join(" ", args);
         System.out.println("开始执行任务...");
         try {

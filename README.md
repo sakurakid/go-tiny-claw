@@ -29,6 +29,7 @@ go-tiny-claw/
     └── tools/
         ├── BaseTool.java          # 所有本地工具的统一接口
         ├── BashTool.java          # 以 WorkDir 为默认目录执行终端命令
+        ├── EditFileTool.java      # 对现有文件做局部字符串替换
         ├── ReadFileTool.java      # 读取工作区文件的真实工具
         ├── Registry.java          # 工具注册表接口
         ├── ToolRegistry.java      # 动态工具注册与分发
@@ -47,6 +48,7 @@ go-tiny-claw/
 - `AnthropicCompatibleProvider` 支持 Claude / 兼容 Anthropic Messages API 的服务。
 - `ReadFileTool` 读取 `WorkDir` 内文件，并做路径边界校验与 8000 字节截断。
 - `WriteFileTool` 创建或覆盖写入 `WorkDir` 内文件，并自动创建父目录。
+- `EditFileTool` 对现有文件做局部替换，要求 `old_text` 唯一匹配，并提供换行/缩进容错。
 - `BashTool` 以 `WorkDir` 为默认目录执行终端命令，带 30 秒超时、非 0 退出回传和 8000 字节截断。
 
 ## 慢思考模式
@@ -69,10 +71,10 @@ AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, tru
 1. `Main` 获取当前目录作为 `WorkDir` 物理边界。
 2. `Main` 初始化真实 Provider 和 `ToolRegistry`。
 3. `AgentEngine` 创建 `contextHistory`，写入 system message 和 user message。
-4. `ToolRegistry` 挂载 `read_file / write_file / bash` 极简工具集。
-5. 模型用 `bash` 查看 Java 版本。
-6. 模型用 `write_file` 写入 `HelloWorld.java`。
-7. 模型用 `bash` 编译并运行 `HelloWorld.java`。
+4. `ToolRegistry` 挂载 `read_file / write_file / edit_file / bash` 极简工具集。
+5. 模型用 `read_file` 读取 `EditTarget.java`。
+6. 模型用 `edit_file` 局部替换 `Greeter.message()` 的返回字符串。
+7. 模型用 `bash` 编译并运行 `EditTarget.java`。
 8. `AgentEngine` 把每次工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
 9. 模型根据 Observation 总结任务是否完成。
 

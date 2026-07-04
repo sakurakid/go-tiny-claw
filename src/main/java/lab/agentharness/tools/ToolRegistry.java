@@ -24,6 +24,7 @@ public final class ToolRegistry implements Registry {
         ToolRegistry registry = newRegistry();
         registry.register(new ReadFileTool(workspace));
         registry.register(new WriteFileTool(workspace));
+        registry.register(new EditFileTool(workspace));
         registry.register(new BashTool(workspace));
         return registry;
     }
