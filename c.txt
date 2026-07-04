@@ -1,0 +1,4 @@
+领域：Java 项目构建
+
+这份说明记录了 Maven 编译、main 方法运行、classpath 配置和 target 目录的作用。
+它用于帮助开发者理解为什么修改源码后需要重新 compile 再运行。

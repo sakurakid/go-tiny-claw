@@ -31,15 +31,14 @@ public final class Main {
         // 3. 初始化真实的 Tool Registry，并挂载 read_file/write_file/bash 极简工具集。
         Registry registry = ToolRegistry.demoRegistry(workDir);
 
-        // 4. 实例化核心引擎。这里关闭慢思考，体验 YOLO 急速模式。
-        AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, false);
+        // 4. 实例化核心引擎。这里开启慢思考，先规划再并发读取多个文件。
+        AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, true);
 
         String prompt = args.length == 0
                 ? """
-                请帮我执行以下操作：
-                1. 先用 read_file 读取当前工作区根目录下的 EditTarget.java。
-                2. 用 edit_file 做局部替换，不要重写整个文件：把 Greeter.message() 方法里的返回字符串从 "Hello from original edit target." 改成 "Hello from edit_file tool!"。
-                3. 用 bash 执行 javac EditTarget.java && java EditTarget，确认输出已经变成 Hello from edit_file tool!。
+                我当前目录下有 a.txt, b.txt, c.txt 三个文件。
+                为了节省时间，请你在同一个 Action 阶段一次性发起三个 read_file 工具调用，同时读取这三个文件。
+                然后将它们的内容综合起来，告诉我它们分别记录了什么领域的信息。
                 """
                 : String.join(" ", args);
         System.out.println("开始执行任务...");

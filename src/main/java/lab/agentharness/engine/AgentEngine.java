@@ -5,6 +5,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
 import lab.agentharness.provider.LLMProvider;
@@ -96,20 +100,53 @@ public final class AgentEngine {
                 break;
             }
 
-            LOG.info("[Engine] 模型请求调用 " + actionResp.toolCalls().size() + " 个工具...");
-            for (Schema.ToolCall toolCall : actionResp.toolCalls()) {
-                LOG.info("  -> 执行工具: " + toolCall.name() + ", 参数: " + toolCall.arguments());
+            List<Schema.Message> observationMsgs = executeToolCallsInParallel(actionResp.toolCalls());
+            LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
+            contextHistory.addAll(observationMsgs);
+        }
+    }
 
-                Schema.ToolResult result = registry.execute(toolCall);
-                if (result.isError()) {
-                    LOG.warning("  -> 工具执行报错: " + result.output());
-                } else {
-                    LOG.info("  -> 工具执行成功 (返回 " + bytes(result.output()) + " 字节)");
-                }
+    private List<Schema.Message> executeToolCallsInParallel(List<Schema.ToolCall> toolCalls) {
+        LOG.info("[Engine] 模型请求并发调用 " + toolCalls.size() + " 个工具...");
 
-                Schema.Message observationMsg = Schema.Message.observation(toolCall.id(), result.output());
-                contextHistory.add(observationMsg);
+        int workerCount = Math.min(toolCalls.size(), Math.max(1, Runtime.getRuntime().availableProcessors()));
+        ExecutorService executor = Executors.newFixedThreadPool(workerCount);
+        try {
+            List<CompletableFuture<Schema.Message>> futures = new ArrayList<>(toolCalls.size());
+            for (int i = 0; i < toolCalls.size(); i++) {
+                final int index = i;
+                final Schema.ToolCall toolCall = toolCalls.get(i);
+                futures.add(CompletableFuture.supplyAsync(() -> executeOneTool(index, toolCall), executor));
             }
+
+            List<Schema.Message> observations = new ArrayList<>(toolCalls.size());
+            for (CompletableFuture<Schema.Message> future : futures) {
+                observations.add(future.join());
+            }
+            return observations;
+        } finally {
+            executor.shutdown();
+        }
+    }
+
+    private Schema.Message executeOneTool(int index, Schema.ToolCall toolCall) {
+        try {
+            LOG.info("  -> [Tool-" + index + "] 触发并行执行: " + toolCall.name() + ", 参数: " + toolCall.arguments());
+
+            Schema.ToolResult result = registry.execute(toolCall);
+            if (result.isError()) {
+                LOG.warning("  -> [Tool-" + index + "] 工具执行报错: " + result.output());
+            } else {
+                LOG.info("  -> [Tool-" + index + "] 工具执行成功 (返回 " + bytes(result.output()) + " 字节)");
+            }
+
+            return Schema.Message.observation(toolCall.id(), result.output());
+        } catch (CompletionException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            String output = "Error executing " + toolCall.name() + ": " + e.getMessage();
+            LOG.warning("  -> [Tool-" + index + "] 工具执行异常: " + output);
+            return Schema.Message.observation(toolCall.id(), output);
         }
     }
 

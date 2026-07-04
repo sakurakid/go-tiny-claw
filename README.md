@@ -72,11 +72,11 @@ AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, tru
 2. `Main` 初始化真实 Provider 和 `ToolRegistry`。
 3. `AgentEngine` 创建 `contextHistory`，写入 system message 和 user message。
 4. `ToolRegistry` 挂载 `read_file / write_file / edit_file / bash` 极简工具集。
-5. 模型用 `read_file` 读取 `EditTarget.java`。
-6. 模型用 `edit_file` 局部替换 `Greeter.message()` 的返回字符串。
-7. 模型用 `bash` 编译并运行 `EditTarget.java`。
+5. `Main` 开启慢思考，让模型先规划如何读取多个文件。
+6. 模型在同一轮 Action 中一次性发起三个 `read_file` 调用，读取 `a.txt / b.txt / c.txt`。
+7. `AgentEngine` 并发执行这批工具调用，再按原始顺序聚合 Observation。
 8. `AgentEngine` 把每次工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
-9. 模型根据 Observation 总结任务是否完成。
+9. 模型根据三份文件内容总结它们分别记录的领域信息。
 
 ## 运行方式
 

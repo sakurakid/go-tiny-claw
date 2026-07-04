@@ -86,10 +86,13 @@ public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolea
 5. 如果开启慢思考，先进入 Thinking Phase。
 6. 恢复工具后进入 Action Phase。
 7. 如果模型没有工具调用，说明任务完成，退出循环。
-8. 如果模型请求工具调用，逐个执行 `registry.execute(toolCall)`。
-9. 将工具返回封装成 `Schema.Message.observation(toolCall.id(), result.output())` 写回上下文。
+8. 如果模型请求工具调用，为每个 `ToolCall` 启动一个并发任务执行 `registry.execute(toolCall)`。
+9. 所有工具执行完成后，按模型原始 ToolCall 顺序聚合 Observation。
+10. 将工具返回封装成 `Schema.Message.observation(toolCall.id(), result.output())` 写回上下文。
 
 Observation 必须携带 `ToolCallID`。它是模型在下一轮推理时关联“刚才那个 Action”和“工具返回结果”的线索。
+
+并发执行只改变物理工具的执行方式，不改变上下文时间线。`AgentEngine` 会先预留一批固定顺序的 Observation 槽位，每个异步任务只写入自己的索引位置，所有任务完成后再一次性追加到 `contextHistory`。这样可以并发读取多个文件，同时保持模型看到的 Observation 顺序稳定。
 
 当前 system message 还加入了一条轻量 Harness 边界：如果用户没有明确要求，不安装软件、不下载远程产物、不修改系统级配置。真实测试中模型发现本机缺 Go 后曾尝试安装 Go，这正是 bash 能力过强时容易出现的边界扩张；所以缺运行时应该如实报告，而不是自行安装。
 
@@ -185,7 +188,7 @@ src/main/java/lab/agentharness/tools/BashTool.java
 
 注意：`BashTool` 的 `workDir` 不是强沙箱。命令本身仍然可能通过 `cd` 或绝对路径访问工作区外部资源。真正的高危命令拦截、目录逃逸审计和人工审批应该放到后续 Middleware/Interceptors 层，而不是让基础工具类无限膨胀。
 
-当前 `Main` 会挂载 `read_file / write_file / edit_file / bash`，并要求模型完成一个连续物理任务：读取 `EditTarget.java`、局部替换方法返回值、再编译运行验证。
+当前 `Main` 会挂载 `read_file / write_file / edit_file / bash`，开启慢思考，并要求模型在同一轮 Action 中一次性读取 `a.txt / b.txt / c.txt` 三个文件，再综合判断它们分别记录的领域信息。
 
 ## 7. 模型接入层：双协议 Provider
 
