@@ -175,7 +175,7 @@ src/main/java/lab/agentharness/tools/BashTool.java
 
 注意：`BashTool` 的 `workDir` 不是强沙箱。命令本身仍然可能通过 `cd` 或绝对路径访问工作区外部资源。真正的高危命令拦截、目录逃逸审计和人工审批应该放到后续 Middleware/Interceptors 层，而不是让基础工具类无限膨胀。
 
-当前 `Main` 会挂载 `read_file / write_file / bash`，并要求模型完成一个连续物理任务：查看 Go 版本、写入 `helloworld.go`、再编译运行。
+当前 `Main` 会挂载 `read_file / write_file / bash`，并要求模型完成一个连续物理任务：查看 Java 版本、写入 `HelloWorld.java`、再编译运行。
 
 ## 7. 模型接入层：双协议 Provider
 

@@ -36,10 +36,10 @@ public final class Main {
         String prompt = args.length == 0
                 ? """
                 请帮我执行以下操作：
-                1. 用 bash 查看一下我当前电脑的 Go 版本。
-                2. 帮我写一个简单的 helloworld.go 文件，输出 "Hello, go-tiny-claw!"。
-                3. 如果 Go 已安装，用 bash 编译并运行这个 go 文件，确认它能正常工作。
-                4. 如果 Go 未安装，请直接说明无法在本机确认编译运行；不要安装软件、不要下载依赖、不要修改系统环境。
+                1. 用 bash 查看一下我当前电脑的 Java 版本。
+                2. 帮我写一个简单的 HelloWorld.java 文件，输出 "Hello, Java-tiny-claw!"。
+                3. 用 bash 编译并运行这个 Java 文件，确认它能正常工作。
+                4. 不要安装软件、不要下载依赖、不要修改系统环境；如果本机 Java 工具不可用，请直接说明限制。
                 """
                 : String.join(" ", args);
         System.out.println("开始执行任务...");

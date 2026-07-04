@@ -70,9 +70,9 @@ AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, tru
 2. `Main` 初始化真实 Provider 和 `ToolRegistry`。
 3. `AgentEngine` 创建 `contextHistory`，写入 system message 和 user message。
 4. `ToolRegistry` 挂载 `read_file / write_file / bash` 极简工具集。
-5. 模型用 `bash` 查看 Go 版本。
-6. 模型用 `write_file` 写入 `helloworld.go`。
-7. 模型用 `bash` 编译并运行 `helloworld.go`。
+5. 模型用 `bash` 查看 Java 版本。
+6. 模型用 `write_file` 写入 `HelloWorld.java`。
+7. 模型用 `bash` 编译并运行 `HelloWorld.java`。
 8. `AgentEngine` 把每次工具结果作为 Observation 写回上下文，并保留 `ToolCallID`。
 9. 模型根据 Observation 总结任务是否完成。
 
@@ -89,12 +89,6 @@ set CLAW_PROVIDER=deepseek
 
 mvn clean package
 mvn exec:java
-```
-
-也可以直接运行 jar：
-
-```bash
-java -jar target/go-tiny-claw-0.1.0-SNAPSHOT.jar
 ```
 
 ## Provider 冒烟测试
