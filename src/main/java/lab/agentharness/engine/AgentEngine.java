@@ -52,6 +52,8 @@ public final class AgentEngine {
                 Think step by step, call tools when needed, and stop when the task is complete.
                 Do not install software, download remote artifacts, or change system-level configuration unless the user explicitly asks.
                 If a required runtime is missing, report the limitation instead of trying to install it.
+                Output plain text only. Do not use emoji, keycap symbols, decorative icons, or markdown tables.
+                Use simple numbered lists like "1. ..." when summarizing steps.
                 """));
         contextHistory.add(Schema.Message.user(userPrompt));
 
