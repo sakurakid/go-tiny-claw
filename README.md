@@ -17,6 +17,7 @@ go-tiny-claw/
     │   ├── CompactorSmokeTest.java # 上下文压缩器真实 Provider 冒烟测试入口
     │   ├── FeishuMain.java        # 飞书长连接启动入口，适合本地开发接入机器人
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
+    │   ├── PlanModeSmokeTest.java # Plan Mode 长程任务与断点续传测试入口
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
     │   ├── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
     │   ├── SessionMemorySmokeTest.java # 多 Session 与 Working Memory 冒烟测试入口
@@ -59,6 +60,7 @@ go-tiny-claw/
 - `BaseTool` 规范具体工具：`name()`、`definition()` 和 `execute(arguments)`。
 - `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
+- `AgentEngine` 支持 Plan Mode，通过 System Prompt 强制 Agent 将长程任务计划写入 `PLAN.md` / `TODO.md`。
 - `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
 - `Session` 保存一次持续对话的历史消息，并通过 `getWorkingMemory(limit)` 提取短期工作记忆。
 - `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
@@ -177,6 +179,37 @@ mvn -q "-Dmain.class=lab.agentharness.claw.SessionMemorySmokeTest" exec:java
 ```
 
 这个入口会生成两个本地工作区：`workspace_sessions/project_front` 和 `workspace_sessions/project_back`。前端 Session 会先读取 `README.md` 中的 `token_12345`，再用多轮闲聊把它挤出 Working Memory；后端 Session 会同时运行并验证自己看不到前端 Session 的历史。
+
+## Plan Mode 长程任务
+
+Plan Mode 用于处理“完整项目功能”“多步骤重构”这类容易跨轮次、跨进程丢状态的任务。开启后，`PromptComposer` 会在 System Prompt 中追加计划模式纪律：
+
+1. Agent 被唤醒后必须先用工具检查工作区是否存在 `PLAN.md` 和 `TODO.md`。
+2. 如果不存在，先创建 `PLAN.md` 写清需求理解、架构设计、技术选型，再创建 `TODO.md` 拆解 Markdown Checkbox 任务。
+3. 如果已经存在，绝对不能覆盖，必须读取两份文件并从第一个 `- [ ]` 继续。
+4. 每完成一个 TODO 子任务，必须立刻把对应行改成 `- [x]`，不能最后统一打勾。
+
+Java 入口通过构造引擎时传入 `planMode=true` 开启：
+
+```java
+AgentEngine engine = AgentEngine.newAgentEngine(provider, registry, workDir, false, true);
+```
+
+可以用真实 Provider 在隔离工作区 `workspace_plan` 测试。第一次建议加 `--reset` 清理旧计划文件：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.PlanModeSmokeTest" -Dexec.args="--reset --prompt 帮我实现一个完整的安卓登录相关代码功能" exec:java
+```
+
+后续如果想模拟断点续传，不加 `--reset` 再运行一次即可：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.PlanModeSmokeTest" -Dexec.args="--prompt 继续完成上一次安卓登录功能任务" exec:java
+```
+
+`workspace_plan` 已加入 `.gitignore`，它是本地真实模型演练区，不会进入主仓库提交。
+
+Plan Mode 的单次运行轮数上限比普通模式更高，但仍然有边界：普通任务默认 12 轮，Plan Mode 默认 32 轮。大项目如果一次没做完，测试入口会暂停并保留 `PLAN.md` / `TODO.md`，下一次运行会继续读取文件恢复任务。
 
 ## Compactor 内存压缩
 

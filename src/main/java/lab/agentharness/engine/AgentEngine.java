@@ -24,7 +24,8 @@ import lab.agentharness.tools.ToolRegistry;
  */
 public final class AgentEngine {
     private static final Logger LOG = Logger.getLogger(AgentEngine.class.getName());
-    private static final int MAX_TURNS = 12;
+    private static final int DEFAULT_MAX_TURNS = 12;
+    private static final int PLAN_MODE_MAX_TURNS = 32;
     private static final int SESSION_CONTEXT_LIMIT = 20;
     private static final int COMPACTION_MAX_CHARS = 3000;
     private static final int COMPACTION_RETAIN_LAST_MESSAGES = 6;
@@ -33,16 +34,22 @@ public final class AgentEngine {
     private final Registry registry;
     private final Path workDir;
     private final boolean enableThinking;
+    private final boolean planMode;
     private final PromptComposer composer;
     private final Compactor compactor;
     private final Function<Path, Registry> sessionRegistryFactory;
 
     public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking) {
+        this(provider, registry, workDir, enableThinking, false);
+    }
+
+    public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking, boolean planMode) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.workDir = Objects.requireNonNull(workDir, "workDir").toAbsolutePath().normalize();
         this.enableThinking = enableThinking;
-        this.composer = new PromptComposer(this.workDir);
+        this.planMode = planMode;
+        this.composer = new PromptComposer(this.workDir, this.planMode);
         this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
         this.sessionRegistryFactory = ignored -> this.registry;
     }
@@ -50,11 +57,13 @@ public final class AgentEngine {
     private AgentEngine(
             LLMProvider provider,
             Function<Path, Registry> sessionRegistryFactory,
-            boolean enableThinking) {
+            boolean enableThinking,
+            boolean planMode) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.registry = null;
         this.workDir = null;
         this.enableThinking = enableThinking;
+        this.planMode = planMode;
         this.composer = null;
         this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
         this.sessionRegistryFactory = Objects.requireNonNull(sessionRegistryFactory, "sessionRegistryFactory");
@@ -68,11 +77,28 @@ public final class AgentEngine {
         return new AgentEngine(provider, registry, workDir, enableThinking);
     }
 
+    public static AgentEngine newAgentEngine(
+            LLMProvider provider,
+            Registry registry,
+            Path workDir,
+            boolean enableThinking,
+            boolean planMode) {
+        return new AgentEngine(provider, registry, workDir, enableThinking, planMode);
+    }
+
     /**
      * 创建无固定工作区的引擎，具体工具边界由每个 Session 自己决定。
      */
     public static AgentEngine newSessionAgentEngine(LLMProvider provider, boolean enableThinking) {
-        return new AgentEngine(provider, ToolRegistry::demoRegistry, enableThinking);
+        return newSessionAgentEngine(provider, enableThinking, false);
+    }
+
+    public static AgentEngine newSessionAgentEngine(LLMProvider provider, boolean enableThinking, boolean planMode) {
+        return new AgentEngine(provider, ToolRegistry::demoRegistry, enableThinking, planMode);
+    }
+
+    public boolean planMode() {
+        return planMode;
     }
 
     /**
@@ -92,6 +118,7 @@ public final class AgentEngine {
 
         LOG.info("[Engine] 引擎启动，锁定工作区: " + workDir);
         LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
+        LOG.info("[Engine] 计划模式 (Plan Mode): " + planMode);
 
         List<Schema.Message> contextHistory = new ArrayList<>();
         contextHistory.add(composer.build());
@@ -100,7 +127,7 @@ public final class AgentEngine {
         int turnCount = 0;
         while (true) {
             turnCount++;
-            if (turnCount > MAX_TURNS) {
+            if (turnCount > maxTurns()) {
                 throw new IllegalStateException("Main Loop 超过最大轮数，疑似进入 Doom Loop。");
             }
 
@@ -150,16 +177,17 @@ public final class AgentEngine {
 
         Path sessionWorkDir = session.workDir();
         Registry activeRegistry = registryFor(sessionWorkDir);
-        PromptComposer activeComposer = new PromptComposer(sessionWorkDir);
+        PromptComposer activeComposer = new PromptComposer(sessionWorkDir, planMode);
         Schema.Message systemMessage = activeComposer.build();
 
         LOG.info("[Engine] 唤醒会话 [" + session.id() + "]，锁定工作区: " + sessionWorkDir);
         LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
+        LOG.info("[Engine] 计划模式 (Plan Mode): " + planMode);
 
         int turnCount = 0;
         while (true) {
             turnCount++;
-            if (turnCount > MAX_TURNS) {
+            if (turnCount > maxTurns()) {
                 throw new IllegalStateException("Main Loop 超过最大轮数，疑似进入 Doom Loop。");
             }
 
@@ -214,6 +242,10 @@ public final class AgentEngine {
     private Registry registryFor(Path sessionWorkDir) {
         Registry activeRegistry = sessionRegistryFactory.apply(sessionWorkDir);
         return Objects.requireNonNull(activeRegistry, "session registry");
+    }
+
+    private int maxTurns() {
+        return planMode ? PLAN_MODE_MAX_TURNS : DEFAULT_MAX_TURNS;
     }
 
     private List<Schema.Message> compactForProvider(List<Schema.Message> messages) {

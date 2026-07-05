@@ -4,6 +4,7 @@ target/
 workspace/*.java
 workspace/*.go
 workspace_sessions/
+workspace_plan/
 mock_log.txt
 .idea/
 .vscode/
