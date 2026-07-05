@@ -14,6 +14,7 @@ go-tiny-claw/
 │   └── main-loop-and-schema.md
 └── src/main/java/lab/agentharness/
     ├── claw/
+    │   ├── CompactorSmokeTest.java # 上下文压缩器真实 Provider 冒烟测试入口
     │   ├── FeishuMain.java        # 飞书长连接启动入口，适合本地开发接入机器人
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
@@ -21,6 +22,7 @@ go-tiny-claw/
     │   ├── SessionMemorySmokeTest.java # 多 Session 与 Working Memory 冒烟测试入口
     │   └── SkillPromptSmokeTest.java # PromptComposer 与 SkillLoader 冒烟测试入口
     ├── context/
+    │   ├── Compactor.java         # 请求模型前的上下文水位监控与压缩器
     │   ├── PromptComposer.java    # 动态组装 System Prompt
     │   ├── Skill.java             # 标准化技能结构
     │   └── SkillLoader.java       # 扫描并解析 .claw/skills/**/SKILL.md
@@ -61,6 +63,7 @@ go-tiny-claw/
 - `Session` 保存一次持续对话的历史消息，并通过 `getWorkingMemory(limit)` 提取短期工作记忆。
 - `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
 - `PromptComposer` 动态组装 System Prompt：核心纪律、`AGENTS.md` 和 `.claw/skills/**/SKILL.md`。
+- `Compactor` 在请求大模型前估算上下文字符数，必要时掩码远期大输出并截断近期超大 Observation。
 - `SkillLoader` 解析标准 Skill Markdown，支持 `name` 和 `description` YAML Frontmatter。
 - `FeishuBot` 使用飞书官方 Java SDK 的 WebSocket 长连接模式监听用户消息，不需要公网回调地址。
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
@@ -155,7 +158,7 @@ mvn -q "-Dmain.class=lab.agentharness.claw.SkillPromptSmokeTest" -Dexec.args="--
 `AgentEngine` 现在同时支持两种运行方式：
 
 1. 固定工作区模式：`run(String, Reporter)` 仍然适合单次 CLI Demo，工作区和工具注册表在构造引擎时确定。
-2. Session 模式：`run(Session, Reporter)` 从 `Session` 中恢复最近 6 条消息作为短期工作记忆，并按 `Session.workDir()` 动态组装 `PromptComposer` 与工具注册表。
+2. Session 模式：`run(Session, Reporter)` 从 `Session` 中恢复最近 20 条消息作为候选上下文，并按 `Session.workDir()` 动态组装 `PromptComposer` 与工具注册表。
 
 Session 模式下，外层入口需要先把用户消息写入会话：
 
@@ -165,7 +168,7 @@ session.append(Schema.Message.user("帮我看看 README.md 里记录了什么密
 engine.run(session, new TerminalReporter());
 ```
 
-`Session.getWorkingMemory(6)` 不会直接返回全量历史，而是从尾部截取最近消息。若窗口开头正好是工具 Observation，会自动丢弃这个孤儿消息，避免大模型 API 因工具调用历史不连续而拒绝请求。
+`Session.getWorkingMemory(20)` 不会直接返回全量历史，而是从尾部截取最近消息。若窗口开头正好是工具 Observation，会自动丢弃这个孤儿消息，避免大模型 API 因工具调用历史不连续而拒绝请求。真正发给模型前，还会再经过 `Compactor`，保护最近 6 条消息并压缩早期大输出。
 
 可以用真实 Provider 跑并发隔离测试：
 
@@ -174,6 +177,25 @@ mvn -q "-Dmain.class=lab.agentharness.claw.SessionMemorySmokeTest" exec:java
 ```
 
 这个入口会生成两个本地工作区：`workspace_sessions/project_front` 和 `workspace_sessions/project_back`。前端 Session 会先读取 `README.md` 中的 `token_12345`，再用多轮闲聊把它挤出 Working Memory；后端 Session 会同时运行并验证自己看不到前端 Session 的历史。
+
+## Compactor 内存压缩
+
+`Compactor` 使用字符数量估算上下文压力，避免为了精确 token 计算引入复杂 BPE tokenizer 依赖。当前默认水位线是 3000 字符，并保护最近 6 条消息：
+
+1. `System Prompt` 永远保留，不做压缩。
+2. 远期工具 Observation 如果过长，会被替换成长度提示，避免旧日志反复占用模型窗口。
+3. 近期工具 Observation 即使处于保护区，单条超过 1000 字符也会保留头尾各 500 字符，中间截断。
+4. 远期 Assistant 长回复会折叠，但不会修改 `toolCalls`，保证工具调用链路仍然完整。
+
+压缩只作用于本轮即将发送给 Provider 的临时上下文；`Session` 中保存的历史仍然是完整原文，后续可以再接 JSONL 持久化或更高级摘要策略。
+
+可以用真实 Provider 跑大日志压缩测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.CompactorSmokeTest" exec:java
+```
+
+这个入口会在项目根目录生成一个 4000 字符的 `mock_log.txt`，要求 Agent 使用 `read_file` 读取它。工具结果写回 Session 后，下一轮推理前会触发 `Compactor` 日志，验证大 Observation 被截断后再交给模型。
 
 ## 飞书长连接机器人
 

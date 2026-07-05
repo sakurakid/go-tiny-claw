@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.logging.Logger;
 
+import lab.agentharness.context.Compactor;
 import lab.agentharness.context.PromptComposer;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.schema.Schema;
@@ -24,13 +25,16 @@ import lab.agentharness.tools.ToolRegistry;
 public final class AgentEngine {
     private static final Logger LOG = Logger.getLogger(AgentEngine.class.getName());
     private static final int MAX_TURNS = 12;
-    private static final int WORKING_MEMORY_LIMIT = 6;
+    private static final int SESSION_CONTEXT_LIMIT = 20;
+    private static final int COMPACTION_MAX_CHARS = 3000;
+    private static final int COMPACTION_RETAIN_LAST_MESSAGES = 6;
 
     private final LLMProvider provider;
     private final Registry registry;
     private final Path workDir;
     private final boolean enableThinking;
     private final PromptComposer composer;
+    private final Compactor compactor;
     private final Function<Path, Registry> sessionRegistryFactory;
 
     public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking) {
@@ -39,6 +43,7 @@ public final class AgentEngine {
         this.workDir = Objects.requireNonNull(workDir, "workDir").toAbsolutePath().normalize();
         this.enableThinking = enableThinking;
         this.composer = new PromptComposer(this.workDir);
+        this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
         this.sessionRegistryFactory = ignored -> this.registry;
     }
 
@@ -51,6 +56,7 @@ public final class AgentEngine {
         this.workDir = null;
         this.enableThinking = enableThinking;
         this.composer = null;
+        this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
         this.sessionRegistryFactory = Objects.requireNonNull(sessionRegistryFactory, "sessionRegistryFactory");
     }
 
@@ -104,7 +110,7 @@ public final class AgentEngine {
             if (enableThinking) {
                 LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
                 callReporter(reporter, "onThinking", () -> reporter.onThinking());
-                Schema.Message thinkResp = provider.generate(thinkingContext(contextHistory), List.of());
+                Schema.Message thinkResp = provider.generate(compactForProvider(thinkingContext(contextHistory)), List.of());
                 if (thinkResp == null) {
                     throw new IllegalStateException("Thinking 阶段模型返回空消息。");
                 }
@@ -115,7 +121,7 @@ public final class AgentEngine {
             }
 
             LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
-            Schema.Message actionResp = provider.generate(contextHistory, availableTools);
+            Schema.Message actionResp = provider.generate(compactForProvider(contextHistory), availableTools);
             if (actionResp == null) {
                 throw new IllegalStateException("Action 阶段模型返回空消息。");
             }
@@ -159,7 +165,7 @@ public final class AgentEngine {
 
             List<Schema.Message> contextHistory = new ArrayList<>();
             contextHistory.add(systemMessage);
-            contextHistory.addAll(session.getWorkingMemory(WORKING_MEMORY_LIMIT));
+            contextHistory.addAll(session.getWorkingMemory(SESSION_CONTEXT_LIMIT));
 
             LOG.info("========== [Session " + session.id() + " / Turn " + turnCount + "] 开始 ==========");
             LOG.info("[Engine] Working Memory 消息数: " + (contextHistory.size() - 1)
@@ -170,7 +176,7 @@ public final class AgentEngine {
             if (enableThinking) {
                 LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
                 callReporter(reporter, "onThinking", () -> reporter.onThinking());
-                Schema.Message thinkResp = provider.generate(thinkingContext(contextHistory), List.of());
+                Schema.Message thinkResp = provider.generate(compactForProvider(thinkingContext(contextHistory)), List.of());
                 if (thinkResp == null) {
                     throw new IllegalStateException("Thinking 阶段模型返回空消息。");
                 }
@@ -182,7 +188,7 @@ public final class AgentEngine {
             }
 
             LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
-            Schema.Message actionResp = provider.generate(contextHistory, availableTools);
+            Schema.Message actionResp = provider.generate(compactForProvider(contextHistory), availableTools);
             if (actionResp == null) {
                 throw new IllegalStateException("Action 阶段模型返回空消息。");
             }
@@ -208,6 +214,10 @@ public final class AgentEngine {
     private Registry registryFor(Path sessionWorkDir) {
         Registry activeRegistry = sessionRegistryFactory.apply(sessionWorkDir);
         return Objects.requireNonNull(activeRegistry, "session registry");
+    }
+
+    private List<Schema.Message> compactForProvider(List<Schema.Message> messages) {
+        return compactor.compact(messages);
     }
 
     private List<Schema.Message> executeToolCallsInParallel(
