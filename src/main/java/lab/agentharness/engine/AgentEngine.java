@@ -21,7 +21,7 @@ import lab.agentharness.tools.Registry;
  */
 public final class AgentEngine {
     private static final Logger LOG = Logger.getLogger(AgentEngine.class.getName());
-    private static final int MAX_TURNS = 8;
+    private static final int MAX_TURNS = 12;
 
     private final LLMProvider provider;
     private final Registry registry;

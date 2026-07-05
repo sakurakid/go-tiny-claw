@@ -40,6 +40,9 @@ public final class PromptComposer {
                 7. 必须尊重 WorkDir 边界；不要安装软件、下载远程产物或修改系统级配置，除非用户明确要求。
                 8. 如果缺少必要运行时，请如实报告限制，不要自行安装。
                 9. 输出纯文本即可，不要使用 markdown 表格。
+                10. 调用 bash 工具时直接填写要执行的命令，不要再嵌套 powershell -Command；Windows 下可直接使用 git status && git add ... 这类 cmd 语法。
+                11. 严禁口头宣称文件已创建、命令已执行或代码已提交；只有看到对应工具 Observation 后，才允许报告该动作完成。
+                12. 当用户要求提交代码时，必须实际调用 bash 执行 git status、git add 和 git commit；没有 git commit 的 Observation，不得说提交成功。
                 """);
 
         appendAgentsMd(promptBuilder);

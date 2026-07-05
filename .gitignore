@@ -2,6 +2,7 @@ target/
 .env.local
 *.class
 workspace/*.java
+workspace/*.go
 .idea/
 .vscode/
 *.iml

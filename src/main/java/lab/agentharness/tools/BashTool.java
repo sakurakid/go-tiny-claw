@@ -71,7 +71,7 @@ public final class BashTool implements BaseTool {
 
         String output = outputFuture.get(2, TimeUnit.SECONDS);
         if (process.exitValue() != 0) {
-            return "执行报错: exit code " + process.exitValue() + "\n输出:\n" + truncate(output);
+            throw new IllegalStateException("exit code " + process.exitValue() + "\n输出:\n" + truncate(output));
         }
         if (output.isBlank()) {
             return "命令执行成功，无终端输出。";
