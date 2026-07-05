@@ -6,22 +6,43 @@ package lab.agentharness.engine;
 public final class TerminalReporter implements Reporter {
     @Override
     public void onThinking() {
-        System.out.println("[Thinking] 模型正在慢思考...");
+        System.out.println();
+        System.out.println("[Thinking] 模型正在推理...");
     }
 
     @Override
     public void onToolCall(String toolName, String args) {
-        System.out.println("[ToolCall] " + toolName + " 参数: " + args);
+        System.out.println("[ToolCall] " + toolName);
+        System.out.println("  参数: " + compact(args, 150));
     }
 
     @Override
     public void onToolResult(String toolName, String result, boolean isError) {
         String status = isError ? "执行报错" : "执行成功";
-        System.out.println("[ToolResult] " + toolName + " " + status + ": " + result);
+        System.out.println("[ToolResult] " + toolName + " " + status);
+        if (isError && result != null && !result.isBlank()) {
+            System.out.println("  错误: " + compact(result, 300));
+        }
     }
 
     @Override
     public void onMessage(String content) {
-        System.out.println("[Message] " + content);
+        if (content == null || content.isBlank()) {
+            return;
+        }
+        System.out.println();
+        System.out.println("[Agent]");
+        System.out.println(content);
+        System.out.println();
+    }
+
+    private static String compact(String text, int maxChars) {
+        if (text == null) {
+            return "";
+        }
+        String display = text.replace("\r", "\\r").replace("\n", "\\n");
+        return display.length() <= maxChars
+                ? display
+                : display.substring(0, maxChars) + "... (已截断)";
     }
 }

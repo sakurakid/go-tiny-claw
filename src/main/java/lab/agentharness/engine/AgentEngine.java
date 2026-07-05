@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
+import lab.agentharness.context.PromptComposer;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.schema.Schema;
 import lab.agentharness.tools.Registry;
@@ -26,12 +27,14 @@ public final class AgentEngine {
     private final Registry registry;
     private final Path workDir;
     private final boolean enableThinking;
+    private final PromptComposer composer;
 
     public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.workDir = Objects.requireNonNull(workDir, "workDir").toAbsolutePath().normalize();
         this.enableThinking = enableThinking;
+        this.composer = new PromptComposer(this.workDir);
     }
 
     public static AgentEngine newAgentEngine(
@@ -57,15 +60,7 @@ public final class AgentEngine {
         LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
 
         List<Schema.Message> contextHistory = new ArrayList<>();
-        contextHistory.add(Schema.Message.system("""
-                You are go-tiny-claw, an expert coding assistant.
-                You can use tools inside the workspace, but must respect the WorkDir boundary.
-                Think step by step, call tools when needed, and stop when the task is complete.
-                Do not install software, download remote artifacts, or change system-level configuration unless the user explicitly asks.
-                If a required runtime is missing, report the limitation instead of trying to install it.
-                Output plain text only. Do not use emoji, keycap symbols, decorative icons, or markdown tables.
-                Use simple numbered lists like "1. ..." when summarizing steps.
-                """));
+        contextHistory.add(composer.build());
         contextHistory.add(Schema.Message.user(userPrompt));
 
         int turnCount = 0;

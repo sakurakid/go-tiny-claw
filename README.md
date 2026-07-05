@@ -17,7 +17,12 @@ go-tiny-claw/
     │   ├── FeishuMain.java        # 飞书长连接启动入口，适合本地开发接入机器人
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
-    │   └── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
+    │   ├── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
+    │   └── SkillPromptSmokeTest.java # PromptComposer 与 SkillLoader 冒烟测试入口
+    ├── context/
+    │   ├── PromptComposer.java    # 动态组装 System Prompt
+    │   ├── Skill.java             # 标准化技能结构
+    │   └── SkillLoader.java       # 扫描并解析 .claw/skills/**/SKILL.md
     ├── engine/
     │   ├── AgentEngine.java       # Main Loop / ReAct 核心循环
     │   ├── Reporter.java          # 引擎向外部展示层输出状态的接口
@@ -50,6 +55,8 @@ go-tiny-claw/
 - `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
 - `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
+- `PromptComposer` 动态组装 System Prompt：核心纪律、`AGENTS.md` 和 `.claw/skills/**/SKILL.md`。
+- `SkillLoader` 解析标准 Skill Markdown，支持 `name` 和 `description` YAML Frontmatter。
 - `FeishuBot` 使用飞书官方 Java SDK 的 WebSocket 长连接模式监听用户消息，不需要公网回调地址。
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
 - `OpenAICompatibleProvider` 支持 DeepSeek / 智谱等 OpenAI-compatible 服务。
@@ -99,6 +106,38 @@ mvn compile exec:java
 `mvn compile exec:java` 的含义是：先编译 Java 源码，再通过 Maven 的 exec 插件启动 `lab.agentharness.claw.Main`，并自动带上项目依赖 classpath。它不是打 jar，也不是运行 jar。
 
 如果已经编译过，也可以直接在 IDE 中点击 [Main.java](src/main/java/lab/agentharness/claw/Main.java) 的 `main` 方法运行。
+
+## Skill 与动态 System Prompt
+
+`AgentEngine` 不再硬编码整段 System Prompt，而是在每次 `run` 初始化上下文时调用 `PromptComposer` 动态组装：
+
+1. 核心身份与最小纪律。
+2. 当前 WorkDir 下的 `AGENTS.md` 项目专属指南。
+3. 当前 WorkDir 下 `.claw/skills/**/SKILL.md` 中定义的标准化技能。
+
+Skill 文件使用 YAML Frontmatter 描述触发条件，例如：
+
+```markdown
+---
+name: git-workflow
+description: 当人类用户要求你“提交代码”、“保存变更”或执行 Git 相关操作时，必须使用此技能。
+---
+
+# 提交流程 SOP
+...
+```
+
+本仓库提供了一个隔离的 `workspace` 测试目录，可用下面命令验证 prompt 组装是否正常：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.SkillPromptSmokeTest" exec:java
+```
+
+如需让真实模型在 `workspace` 中执行示例任务，可显式追加 `--run-agent`：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.SkillPromptSmokeTest" -Dexec.args="--run-agent" exec:java
+```
 
 ## 飞书长连接机器人
 

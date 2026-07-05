@@ -276,3 +276,32 @@ src/main/java/lab/agentharness/claw/FeishuMain.java
 飞书后台的 Verification Token 和 Encrypt Key 也会被读取到 `LarkChannelOptions.WebhookOptions`。长连接模式不暴露 HTTP 回调地址，但 SDK 内部仍然复用事件 dispatcher 解析入站事件；当飞书事件订阅启用加密时，Encrypt Key 是必要配置。
 
 这个拆分让引擎保持纯粹：它只知道“该报告什么事件”，不知道事件最后是打印到终端、发到飞书，还是渲染到 Web 页面。
+
+## 9. PromptComposer 与 SkillLoader
+
+早期 `AgentEngine` 直接硬编码 System Prompt。随着项目开始接入飞书、项目规范和可插拔技能，这种写法会让主循环越来越臃肿。因此新增上下文组装模块：
+
+```text
+src/main/java/lab/agentharness/context/PromptComposer.java
+src/main/java/lab/agentharness/context/SkillLoader.java
+src/main/java/lab/agentharness/context/Skill.java
+```
+
+`PromptComposer` 每次在 `AgentEngine.run` 开始时动态生成系统消息，顺序是：
+
+1. 最小核心身份和纪律。
+2. 工作区 `AGENTS.md` 中的项目专属指南。
+3. 工作区 `.claw/skills/**/SKILL.md` 中的标准化技能。
+
+`SkillLoader` 会递归扫描 `.claw/skills`，只处理文件名为 `SKILL.md` 的 Markdown 文件。每个技能支持 YAML Frontmatter：
+
+```markdown
+---
+name: git-workflow
+description: 当人类用户要求你“提交代码”、“保存变更”或执行 Git 相关操作时，必须使用此技能。
+---
+```
+
+解析后，技能会以“技能名称 / 触发条件 / 执行指南”的结构注入 System Prompt。这样模型在看到用户任务时，可以根据 description 选择是否遵循对应技能正文，而不是把所有专项规则写死在引擎里。
+
+本地提供了 `workspace` 目录作为隔离测试 WorkDir，并提供 `SkillPromptSmokeTest` 验证 prompt 组装结果。默认模式只检查和打印 System Prompt，不触发真实模型写文件；追加 `--run-agent` 才会用真实 Provider 执行示例任务。
