@@ -239,3 +239,38 @@ src/main/java/lab/agentharness/claw/ProviderThinkingCompare.java
 - `enableThinking = true`
 
 这样可以观察真实模型在“直接看到工具”和“先被剥夺工具进行规划”两种模式下，是否都会正确发起工具调用并利用 Observation 给出最终建议。
+
+## 8. Reporter 与飞书消息承接层
+
+早期 demo 直接在 `AgentEngine` 里 `System.out.println` 模型回复和工具状态，这只适合本地 CLI，不适合接入飞书、钉钉或 WebUI。现在引擎新增了展示层抽象：
+
+```text
+src/main/java/lab/agentharness/engine/Reporter.java
+```
+
+`Reporter` 定义四个事件：
+
+- `onThinking()`：模型进入慢思考阶段。
+- `onToolCall(toolName, args)`：模型决定调用工具。
+- `onToolResult(toolName, result, isError)`：工具执行完毕。
+- `onMessage(content)`：模型输出阶段性文本或最终回复。
+
+`AgentEngine.run(userPrompt, reporter)` 会在主循环关键节点触发这些事件。Observation 仍然以完整内容写回模型上下文，但 Reporter 层只展示给人类看的摘要，避免大文件或长命令输出刷爆飞书消息。
+
+本地 CLI 使用：
+
+```text
+src/main/java/lab/agentharness/engine/TerminalReporter.java
+```
+
+飞书模式使用：
+
+```text
+src/main/java/lab/agentharness/feishu/FeishuBot.java
+src/main/java/lab/agentharness/feishu/FeishuReporter.java
+src/main/java/lab/agentharness/claw/FeishuMain.java
+```
+
+`FeishuBot` 使用飞书官方 Java SDK 的 `LarkChannel` WebSocket 长连接能力监听消息。本地进程主动连到飞书开放平台，因此不需要公网回调地址。收到消息后，Bot 会把任务投递到独立线程，避免阻塞 SDK 的事件处理线程；每个会话创建一个 `FeishuReporter`，再调用同一个 `AgentEngine` 执行任务。
+
+这个拆分让引擎保持纯粹：它只知道“该报告什么事件”，不知道事件最后是打印到终端、发到飞书，还是渲染到 Web 页面。

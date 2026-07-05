@@ -46,6 +46,13 @@ public final class AgentEngine {
      * 启动 Agent 生命周期：初始化上下文，循环推理，执行工具，并把 Observation 写回上下文。
      */
     public void run(String userPrompt) {
+        run(userPrompt, new TerminalReporter());
+    }
+
+    /**
+     * 启动 Agent 生命周期，并通过 Reporter 把关键状态输出给外部展示层。
+     */
+    public void run(String userPrompt, Reporter reporter) {
         LOG.info("[Engine] 引擎启动，锁定工作区: " + workDir);
         LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
 
@@ -73,13 +80,13 @@ public final class AgentEngine {
 
             if (enableThinking) {
                 LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
+                callReporter(reporter, "onThinking", () -> reporter.onThinking());
                 Schema.Message thinkResp = provider.generate(thinkingContext(contextHistory), List.of());
                 if (thinkResp == null) {
                     throw new IllegalStateException("Thinking 阶段模型返回空消息。");
                 }
 
                 if (thinkResp.content() != null && !thinkResp.content().isBlank()) {
-                    System.out.println("内部思考 Trace: " + thinkResp.content());
                     contextHistory.add(thinkResp);
                 }
             }
@@ -92,7 +99,7 @@ public final class AgentEngine {
 
             contextHistory.add(actionResp);
             if (actionResp.content() != null && !actionResp.content().isBlank()) {
-                System.out.println("对外回复: " + actionResp.content());
+                callReporter(reporter, "onMessage", () -> reporter.onMessage(actionResp.content()));
             }
 
             if (!actionResp.hasToolCalls()) {
@@ -100,13 +107,13 @@ public final class AgentEngine {
                 break;
             }
 
-            List<Schema.Message> observationMsgs = executeToolCallsInParallel(actionResp.toolCalls());
+            List<Schema.Message> observationMsgs = executeToolCallsInParallel(actionResp.toolCalls(), reporter);
             LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
             contextHistory.addAll(observationMsgs);
         }
     }
 
-    private List<Schema.Message> executeToolCallsInParallel(List<Schema.ToolCall> toolCalls) {
+    private List<Schema.Message> executeToolCallsInParallel(List<Schema.ToolCall> toolCalls, Reporter reporter) {
         LOG.info("[Engine] 模型请求并发调用 " + toolCalls.size() + " 个工具...");
 
         int workerCount = Math.min(toolCalls.size(), Math.max(1, Runtime.getRuntime().availableProcessors()));
@@ -116,7 +123,7 @@ public final class AgentEngine {
             for (int i = 0; i < toolCalls.size(); i++) {
                 final int index = i;
                 final Schema.ToolCall toolCall = toolCalls.get(i);
-                futures.add(CompletableFuture.supplyAsync(() -> executeOneTool(index, toolCall), executor));
+                futures.add(CompletableFuture.supplyAsync(() -> executeOneTool(index, toolCall, reporter), executor));
             }
 
             List<Schema.Message> observations = new ArrayList<>(toolCalls.size());
@@ -129,9 +136,11 @@ public final class AgentEngine {
         }
     }
 
-    private Schema.Message executeOneTool(int index, Schema.ToolCall toolCall) {
+    private Schema.Message executeOneTool(int index, Schema.ToolCall toolCall, Reporter reporter) {
         try {
             LOG.info("  -> [Tool-" + index + "] 触发并行执行: " + toolCall.name() + ", 参数: " + toolCall.arguments());
+            callReporter(reporter, "onToolCall",
+                    () -> reporter.onToolCall(toolCall.name(), String.valueOf(toolCall.arguments())));
 
             Schema.ToolResult result = registry.execute(toolCall);
             if (result.isError()) {
@@ -139,6 +148,9 @@ public final class AgentEngine {
             } else {
                 LOG.info("  -> [Tool-" + index + "] 工具执行成功 (返回 " + bytes(result.output()) + " 字节)");
             }
+            String displayOutput = truncateForReporter(result.output());
+            callReporter(reporter, "onToolResult",
+                    () -> reporter.onToolResult(toolCall.name(), displayOutput, result.isError()));
 
             return Schema.Message.observation(toolCall.id(), result.output());
         } catch (CompletionException e) {
@@ -146,12 +158,35 @@ public final class AgentEngine {
         } catch (RuntimeException e) {
             String output = "Error executing " + toolCall.name() + ": " + e.getMessage();
             LOG.warning("  -> [Tool-" + index + "] 工具执行异常: " + output);
+            callReporter(reporter, "onToolResult",
+                    () -> reporter.onToolResult(toolCall.name(), output, true));
             return Schema.Message.observation(toolCall.id(), output);
+        }
+    }
+
+    private static void callReporter(Reporter reporter, String eventName, Runnable event) {
+        if (reporter == null) {
+            return;
+        }
+        try {
+            event.run();
+        } catch (RuntimeException e) {
+            LOG.warning("[Reporter] " + eventName + " 回调失败: " + e.getMessage());
         }
     }
 
     private static int bytes(String text) {
         return text == null ? 0 : text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static String truncateForReporter(String text) {
+        if (text == null) {
+            return "";
+        }
+        int maxChars = 200;
+        return text.length() <= maxChars
+                ? text
+                : text.substring(0, maxChars) + "... (已截断)";
     }
 
     private static List<Schema.Message> thinkingContext(List<Schema.Message> contextHistory) {

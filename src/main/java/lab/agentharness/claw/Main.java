@@ -28,7 +28,7 @@ public final class Main {
         // 2. 初始化真实的大脑。优先读取系统环境变量，其次读取本地 .env.local。
         LLMProvider provider = providerFromEnv();
 
-        // 3. 初始化真实的 Tool Registry，并挂载 read_file/write_file/bash 极简工具集。
+        // 3. 初始化真实的 Tool Registry，并挂载 read_file/write_file/edit_file/bash 极简工具集。
         Registry registry = ToolRegistry.demoRegistry(workDir);
 
         // 4. 实例化核心引擎。这里开启慢思考，先规划再并发读取多个文件。
@@ -48,11 +48,9 @@ public final class Main {
             LOG.severe("引擎运行崩溃: " + e.getMessage());
             throw e;
         }
-
-        LOG.info("架构蓝图搭建完毕，等待各核心模块注入！");
     }
 
-    private static LLMProvider providerFromEnv() {
+    static LLMProvider providerFromEnv() {
         String providerName = AppConfig.get("CLAW_PROVIDER", hasText(AppConfig.get("ZHIPU_API_KEY")) ? "zhipu" : "deepseek");
         return switch (providerName.toLowerCase()) {
             case "zhipu", "zhipu-openai" -> OpenAICompatibleProvider.newZhipuProvider(AppConfig.get("ZHIPU_MODEL", "glm-4.5-air"));

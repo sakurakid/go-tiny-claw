@@ -2,7 +2,7 @@
 
 一个用 Java 编写的 Agent Harness 练习 Demo。
 
-这个仓库参考 tiny-claw / claw 风格的 Go 项目结构，但实现语言使用 Java。当前目标不是做完整框架，而是用尽量少的代码跑通 Harness 最核心的几件事：统一 Schema、Provider 抽象、Tool Registry、Main Loop，以及慢思考模式。
+这个仓库参考 tiny-claw / claw 风格的 Go 项目结构，但实现语言使用 Java。当前目标不是做完整框架，而是用尽量少的代码跑通 Harness 最核心的几件事：统一 Schema、Provider 抽象、Tool Registry、Main Loop、慢思考模式，以及面向飞书机器人的消息承接层。
 
 ## 项目结构
 
@@ -14,11 +14,17 @@ go-tiny-claw/
 │   └── main-loop-and-schema.md
 └── src/main/java/lab/agentharness/
     ├── claw/
+    │   ├── FeishuMain.java        # 飞书长连接启动入口，适合本地开发接入机器人
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
     │   └── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
     ├── engine/
-    │   └── AgentEngine.java       # Main Loop / ReAct 核心循环
+    │   ├── AgentEngine.java       # Main Loop / ReAct 核心循环
+    │   ├── Reporter.java          # 引擎向外部展示层输出状态的接口
+    │   └── TerminalReporter.java  # 本地 CLI 的默认 Reporter
+    ├── feishu/
+    │   ├── FeishuBot.java         # 飞书长连接事件监听与 Agent 任务桥接
+    │   └── FeishuReporter.java    # 将 Agent 状态发送回飞书会话
     ├── provider/
     │   ├── AnthropicCompatibleProvider.java # Anthropic-compatible 协议适配器
     │   ├── LLMProvider.java                 # LLM Provider 接口
@@ -43,6 +49,8 @@ go-tiny-claw/
 - `BaseTool` 规范具体工具：`name()`、`definition()` 和 `execute(arguments)`。
 - `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
+- `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
+- `FeishuBot` 使用飞书官方 Java SDK 的 WebSocket 长连接模式监听用户消息，不需要公网回调地址。
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
 - `OpenAICompatibleProvider` 支持 DeepSeek / 智谱等 OpenAI-compatible 服务。
 - `AnthropicCompatibleProvider` 支持 Claude / 兼容 Anthropic Messages API 的服务。
@@ -91,6 +99,37 @@ mvn compile exec:java
 `mvn compile exec:java` 的含义是：先编译 Java 源码，再通过 Maven 的 exec 插件启动 `lab.agentharness.claw.Main`，并自动带上项目依赖 classpath。它不是打 jar，也不是运行 jar。
 
 如果已经编译过，也可以直接在 IDE 中点击 [Main.java](src/main/java/lab/agentharness/claw/Main.java) 的 `main` 方法运行。
+
+## 飞书长连接机器人
+
+项目已经接入飞书官方 Java SDK：
+
+```xml
+<dependency>
+    <groupId>com.larksuite.oapi</groupId>
+    <artifactId>oapi-sdk</artifactId>
+    <version>2.8.3</version>
+</dependency>
+```
+
+飞书模式使用 SDK 的 WebSocket 长连接能力，本地进程主动连接飞书开放平台，因此不需要配置本地公网 URL，也不需要内网穿透。飞书后台需要开启机器人能力、事件订阅的长连接模式，并订阅接收消息事件。
+
+`.env.local` 中增加飞书配置：
+
+```bash
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=你的 app secret
+```
+
+启动飞书长连接入口：
+
+```bash
+mvn -q -Dmain.class=lab.agentharness.claw.FeishuMain exec:java
+```
+
+启动成功后，终端会打印机器人身份和长连接状态。之后在飞书里给机器人发消息，`FeishuBot` 会为当前会话创建 `FeishuReporter`，并把慢思考、工具调用、工具结果和最终回复发回飞书。
+
+注意：如果改用 HTTP Webhook 模式，才需要配置类似 `/webhook/event` 的公网回调地址；当前长连接方案没有这个地址。
 
 ## Provider 冒烟测试
 
