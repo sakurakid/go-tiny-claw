@@ -273,4 +273,6 @@ src/main/java/lab/agentharness/claw/FeishuMain.java
 
 `FeishuBot` 使用飞书官方 Java SDK 的 `LarkChannel` WebSocket 长连接能力监听消息。本地进程主动连到飞书开放平台，因此不需要公网回调地址。收到消息后，Bot 会把任务投递到独立线程，避免阻塞 SDK 的事件处理线程；每个会话创建一个 `FeishuReporter`，再调用同一个 `AgentEngine` 执行任务。
 
+飞书后台的 Verification Token 和 Encrypt Key 也会被读取到 `LarkChannelOptions.WebhookOptions`。长连接模式不暴露 HTTP 回调地址，但 SDK 内部仍然复用事件 dispatcher 解析入站事件；当飞书事件订阅启用加密时，Encrypt Key 是必要配置。
+
 这个拆分让引擎保持纯粹：它只知道“该报告什么事件”，不知道事件最后是打印到终端、发到飞书，还是渲染到 Web 页面。

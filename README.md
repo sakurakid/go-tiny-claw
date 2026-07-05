@@ -119,7 +119,11 @@ mvn compile exec:java
 ```bash
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=你的 app secret
+FEISHU_VERIFY_TOKEN=你的 Verification Token
+FEISHU_ENCRYPT_KEY=你的 Encrypt Key
 ```
+
+`FEISHU_VERIFY_TOKEN` 和 `FEISHU_ENCRYPT_KEY` 对应飞书事件订阅里的 Verification Token 与 Encrypt Key。长连接模式虽然不需要公网回调地址，但 SDK 内部仍会用事件 dispatcher 解析和校验入站事件；如果飞书后台开启了事件加密，必须配置 Encrypt Key。
 
 启动飞书长连接入口：
 

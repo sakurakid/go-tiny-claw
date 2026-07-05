@@ -9,6 +9,7 @@ import java.util.logging.Logger;
 import com.lark.oapi.channel.LarkChannel;
 import com.lark.oapi.channel.LarkChannelFactory;
 import com.lark.oapi.channel.config.LarkChannelOptions;
+import com.lark.oapi.channel.config.LarkChannelOptions.WebhookOptions;
 import com.lark.oapi.channel.model.BotIdentity;
 import com.lark.oapi.channel.model.ChannelErrorEvent;
 import com.lark.oapi.channel.model.NormalizedMessage;
@@ -100,13 +101,27 @@ public final class FeishuBot {
             throw new IllegalStateException("请设置 FEISHU_APP_ID 和 FEISHU_APP_SECRET");
         }
 
-        LarkChannelOptions options = LarkChannelOptions.newBuilder(appId, appSecret)
-                .transport("websocket")
-                .build();
-        return LarkChannelFactory.createLarkChannel(options);
+        LarkChannelOptions.Builder builder = LarkChannelOptions.newBuilder(appId, appSecret)
+                .transport("websocket");
+
+        // 长连接内部仍会通过 SDK 的 EventDispatcher 处理事件，开启事件加密时需要传入这两个校验参数。
+        String verifyToken = AppConfig.get("FEISHU_VERIFY_TOKEN");
+        String encryptKey = AppConfig.get("FEISHU_ENCRYPT_KEY");
+        if (hasText(verifyToken) || hasText(encryptKey)) {
+            WebhookOptions webhookOptions = new WebhookOptions();
+            webhookOptions.setVerificationToken(blankIfNull(verifyToken));
+            webhookOptions.setEncryptKey(blankIfNull(encryptKey));
+            builder.webhook(webhookOptions);
+        }
+
+        return LarkChannelFactory.createLarkChannel(builder.build());
     }
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static String blankIfNull(String value) {
+        return value == null ? "" : value;
     }
 }
