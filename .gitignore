@@ -3,6 +3,7 @@ target/
 *.class
 workspace/*.java
 workspace/*.go
+workspace_sessions/
 .idea/
 .vscode/
 *.iml

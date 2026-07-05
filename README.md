@@ -18,6 +18,7 @@ go-tiny-claw/
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
     │   ├── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
+    │   ├── SessionMemorySmokeTest.java # 多 Session 与 Working Memory 冒烟测试入口
     │   └── SkillPromptSmokeTest.java # PromptComposer 与 SkillLoader 冒烟测试入口
     ├── context/
     │   ├── PromptComposer.java    # 动态组装 System Prompt
@@ -26,6 +27,8 @@ go-tiny-claw/
     ├── engine/
     │   ├── AgentEngine.java       # Main Loop / ReAct 核心循环
     │   ├── Reporter.java          # 引擎向外部展示层输出状态的接口
+    │   ├── Session.java           # 单个会话的历史消息与短期工作记忆
+    │   ├── SessionManager.java    # 全局会话管理器，用于多用户/多终端隔离
     │   └── TerminalReporter.java  # 本地 CLI 的默认 Reporter
     ├── feishu/
     │   ├── FeishuBot.java         # 飞书长连接事件监听与 Agent 任务桥接
@@ -55,6 +58,8 @@ go-tiny-claw/
 - `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
 - `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
+- `Session` 保存一次持续对话的历史消息，并通过 `getWorkingMemory(limit)` 提取短期工作记忆。
+- `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
 - `PromptComposer` 动态组装 System Prompt：核心纪律、`AGENTS.md` 和 `.claw/skills/**/SKILL.md`。
 - `SkillLoader` 解析标准 Skill Markdown，支持 `name` 和 `description` YAML Frontmatter。
 - `FeishuBot` 使用飞书官方 Java SDK 的 WebSocket 长连接模式监听用户消息，不需要公网回调地址。
@@ -144,6 +149,31 @@ mvn -q "-Dmain.class=lab.agentharness.claw.SkillPromptSmokeTest" -Dexec.args="--
 ```bash
 mvn -q "-Dmain.class=lab.agentharness.claw.SkillPromptSmokeTest" -Dexec.args="--run-agent 我需要在当前目录下新建一个 ping.go，提供一个简单的 http ping 接口。写完之后，帮我把代码用 git 提交一下。" exec:java
 ```
+
+## Session 与 Working Memory
+
+`AgentEngine` 现在同时支持两种运行方式：
+
+1. 固定工作区模式：`run(String, Reporter)` 仍然适合单次 CLI Demo，工作区和工具注册表在构造引擎时确定。
+2. Session 模式：`run(Session, Reporter)` 从 `Session` 中恢复最近 6 条消息作为短期工作记忆，并按 `Session.workDir()` 动态组装 `PromptComposer` 与工具注册表。
+
+Session 模式下，外层入口需要先把用户消息写入会话：
+
+```java
+Session session = SessionManager.GLOBAL.getOrCreate("chat_front_001", frontDir);
+session.append(Schema.Message.user("帮我看看 README.md 里记录了什么密钥？"));
+engine.run(session, new TerminalReporter());
+```
+
+`Session.getWorkingMemory(6)` 不会直接返回全量历史，而是从尾部截取最近消息。若窗口开头正好是工具 Observation，会自动丢弃这个孤儿消息，避免大模型 API 因工具调用历史不连续而拒绝请求。
+
+可以用真实 Provider 跑并发隔离测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.SessionMemorySmokeTest" exec:java
+```
+
+这个入口会生成两个本地工作区：`workspace_sessions/project_front` 和 `workspace_sessions/project_back`。前端 Session 会先读取 `README.md` 中的 `token_12345`，再用多轮闲聊把它挤出 Working Memory；后端 Session 会同时运行并验证自己看不到前端 Session 的历史。
 
 ## 飞书长连接机器人
 
