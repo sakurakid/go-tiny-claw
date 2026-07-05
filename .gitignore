@@ -1,6 +1,7 @@
 target/
 .env.local
 *.class
+workspace/*.java
 .idea/
 .vscode/
 *.iml
