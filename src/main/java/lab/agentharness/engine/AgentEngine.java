@@ -39,6 +39,7 @@ public final class AgentEngine {
     private final PromptComposer composer;
     private final Compactor compactor;
     private final RecoveryManager recoveryManager;
+    private final ReminderInjector reminderInjector;
     private final Function<Path, Registry> sessionRegistryFactory;
 
     public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking) {
@@ -54,6 +55,7 @@ public final class AgentEngine {
         this.composer = new PromptComposer(this.workDir, this.planMode);
         this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
         this.recoveryManager = RecoveryManager.newRecoveryManager();
+        this.reminderInjector = ReminderInjector.newReminderInjector();
         this.sessionRegistryFactory = ignored -> this.registry;
     }
 
@@ -70,6 +72,7 @@ public final class AgentEngine {
         this.composer = null;
         this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
         this.recoveryManager = RecoveryManager.newRecoveryManager();
+        this.reminderInjector = ReminderInjector.newReminderInjector();
         this.sessionRegistryFactory = Objects.requireNonNull(sessionRegistryFactory, "sessionRegistryFactory");
     }
 
@@ -167,9 +170,10 @@ public final class AgentEngine {
                 break;
             }
 
-            List<Schema.Message> observationMsgs = executeToolCallsInParallel(registry, actionResp.toolCalls(), reporter);
+            List<ToolExecution> executions = executeToolCallsInParallel(registry, actionResp.toolCalls(), reporter);
             LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
-            contextHistory.addAll(observationMsgs);
+            contextHistory.addAll(observations(executions));
+            contextHistory.addAll(reminders(executions));
         }
     }
 
@@ -236,10 +240,11 @@ public final class AgentEngine {
                 break;
             }
 
-            List<Schema.Message> observationMsgs =
+            List<ToolExecution> executions =
                     executeToolCallsInParallel(activeRegistry, actionResp.toolCalls(), reporter);
             LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
-            session.append(observationMsgs);
+            session.append(observations(executions));
+            session.append(reminders(executions));
         }
     }
 
@@ -256,7 +261,7 @@ public final class AgentEngine {
         return compactor.compact(messages);
     }
 
-    private List<Schema.Message> executeToolCallsInParallel(
+    private List<ToolExecution> executeToolCallsInParallel(
             Registry activeRegistry,
             List<Schema.ToolCall> toolCalls,
             Reporter reporter) {
@@ -265,7 +270,7 @@ public final class AgentEngine {
         int workerCount = Math.min(toolCalls.size(), Math.max(1, Runtime.getRuntime().availableProcessors()));
         ExecutorService executor = Executors.newFixedThreadPool(workerCount);
         try {
-            List<CompletableFuture<Schema.Message>> futures = new ArrayList<>(toolCalls.size());
+            List<CompletableFuture<ToolExecution>> futures = new ArrayList<>(toolCalls.size());
             for (int i = 0; i < toolCalls.size(); i++) {
                 final int index = i;
                 final Schema.ToolCall toolCall = toolCalls.get(i);
@@ -273,17 +278,17 @@ public final class AgentEngine {
                         () -> executeOneTool(activeRegistry, index, toolCall, reporter), executor));
             }
 
-            List<Schema.Message> observations = new ArrayList<>(toolCalls.size());
-            for (CompletableFuture<Schema.Message> future : futures) {
-                observations.add(future.join());
+            List<ToolExecution> executions = new ArrayList<>(toolCalls.size());
+            for (CompletableFuture<ToolExecution> future : futures) {
+                executions.add(future.join());
             }
-            return observations;
+            return executions;
         } finally {
             executor.shutdown();
         }
     }
 
-    private Schema.Message executeOneTool(
+    private ToolExecution executeOneTool(
             Registry activeRegistry,
             int index,
             Schema.ToolCall toolCall,
@@ -305,7 +310,10 @@ public final class AgentEngine {
             callReporter(reporter, "onToolResult",
                     () -> reporter.onToolResult(toolCall.name(), displayOutput, result.isError()));
 
-            return Schema.Message.observation(toolCall.id(), finalOutput);
+            Schema.ToolResult finalResult = result.isError()
+                    ? Schema.ToolResult.error(toolCall.id(), finalOutput)
+                    : Schema.ToolResult.ok(toolCall.id(), finalOutput);
+            return new ToolExecution(toolCall, finalResult, Schema.Message.observation(toolCall.id(), finalOutput));
         } catch (CompletionException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -315,8 +323,26 @@ public final class AgentEngine {
             String displayOutput = truncateForReporter(output);
             callReporter(reporter, "onToolResult",
                     () -> reporter.onToolResult(toolCall.name(), displayOutput, true));
-            return Schema.Message.observation(toolCall.id(), output);
+            Schema.ToolResult finalResult = Schema.ToolResult.error(toolCall.id(), output);
+            return new ToolExecution(toolCall, finalResult, Schema.Message.observation(toolCall.id(), output));
         }
+    }
+
+    private List<Schema.Message> observations(List<ToolExecution> executions) {
+        return executions.stream()
+                .map(ToolExecution::observation)
+                .toList();
+    }
+
+    private List<Schema.Message> reminders(List<ToolExecution> executions) {
+        List<Schema.Message> reminders = new ArrayList<>();
+        for (ToolExecution execution : executions) {
+            Schema.Message reminder = reminderInjector.checkAndInject(execution.toolCall(), execution.result());
+            if (reminder != null) {
+                reminders.add(reminder);
+            }
+        }
+        return reminders;
     }
 
     private static void callReporter(Reporter reporter, String eventName, Runnable event) {
@@ -353,5 +379,11 @@ public final class AgentEngine {
                 等待 Action Phase 恢复工具后，再根据可用工具采取行动。
                 """));
         return thinkingMessages;
+    }
+
+    private record ToolExecution(
+            Schema.ToolCall toolCall,
+            Schema.ToolResult result,
+            Schema.Message observation) {
     }
 }

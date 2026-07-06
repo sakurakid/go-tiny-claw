@@ -15,6 +15,7 @@ go-tiny-claw/
 └── src/main/java/lab/agentharness/
     ├── claw/
     │   ├── CompactorSmokeTest.java # 上下文压缩器真实 Provider 冒烟测试入口
+    │   ├── DoomLoopReminderSmokeTest.java # Doom Loop 动态提醒干预测试入口
     │   ├── FeishuMain.java        # 飞书长连接启动入口，适合本地开发接入机器人
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
     │   ├── PlanModeSmokeTest.java # Plan Mode 长程任务与断点续传测试入口
@@ -31,6 +32,7 @@ go-tiny-claw/
     │   └── SkillLoader.java       # 扫描并解析 .claw/skills/**/SKILL.md
     ├── engine/
     │   ├── AgentEngine.java       # Main Loop / ReAct 核心循环
+    │   ├── ReminderInjector.java  # 重复失败探测与运行时 System Reminder 注入
     │   ├── Reporter.java          # 引擎向外部展示层输出状态的接口
     │   ├── Session.java           # 单个会话的历史消息与短期工作记忆
     │   ├── SessionManager.java    # 全局会话管理器，用于多用户/多终端隔离
@@ -63,6 +65,7 @@ go-tiny-claw/
 - `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
 - `AgentEngine` 支持 Plan Mode，通过 System Prompt 强制 Agent 将长程任务计划写入 `PLAN.md` / `TODO.md`。
+- `ReminderInjector` 监控连续同参工具失败，达到阈值后注入 `[SYSTEM REMINDER]` 打断 Doom Loop。
 - `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
 - `Session` 保存一次持续对话的历史消息，并通过 `getWorkingMemory(limit)` 提取短期工作记忆。
 - `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
@@ -201,6 +204,25 @@ mvn -q "-Dmain.class=lab.agentharness.claw.RecoverySmokeTest" exec:java
 ```
 
 这个入口会在 `workspace/auth.java` 写入一个带复杂缩进的测试文件，然后诱导模型先用错误的 `old_text` 调用 `edit_file`。失败结果会带上 `[系统救援指南]`，模型随后应转向读取文件并重新编辑。
+
+## System Reminder 死循环干预
+
+`ReminderInjector` 用于处理比单次错误更危险的情况：模型在同一个错误动作上反复盲试，进入 Doom Loop。它会在每轮工具执行后计算 `toolName + arguments` 的指纹，并统计连续失败次数。
+
+当前策略：
+
+1. 工具执行成功时，清空连续失败计数器，说明当前路径已经走通。
+2. 工具执行失败时，累加该工具参数指纹的失败次数。
+3. 同一指纹连续失败达到 3 次后，向上下文尾部追加一条 `Role.USER` 的 `[SYSTEM REMINDER 警告]`。
+4. Reminder 会要求模型停止重复同参调用，改换策略；如果无法解决，要向用户说明需要人工帮助。
+
+可以用真实 Provider 跑死循环干预测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.DoomLoopReminderSmokeTest" exec:java
+```
+
+这个入口会确保 `workspace/secret_key.txt` 不存在，然后诱导模型连续使用相同参数调用 `read_file`。当同一工具参数连续失败 3 次时，日志会出现 `[Reminder] 触发死循环干预`，下一轮上下文会带上 `[SYSTEM REMINDER 警告]`。
 
 ## Plan Mode 长程任务
 
