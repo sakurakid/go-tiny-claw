@@ -11,7 +11,8 @@ go-tiny-claw/
 ├── pom.xml
 ├── README.md
 ├── docs/
-│   └── main-loop-and-schema.md
+│   ├── main-loop-and-schema.md
+│   └── subagent.md
 └── src/main/java/lab/agentharness/
     ├── claw/
     │   ├── CompactorSmokeTest.java # 上下文压缩器真实 Provider 冒烟测试入口
@@ -23,6 +24,7 @@ go-tiny-claw/
     │   ├── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
     │   ├── RecoverySmokeTest.java # 工具失败自愈提示注入测试入口
     │   ├── SessionMemorySmokeTest.java # 多 Session 与 Working Memory 冒烟测试入口
+    │   ├── SubagentSmokeTest.java # 主 Agent 委派只读子智能体的协同测试入口
     │   └── SkillPromptSmokeTest.java # PromptComposer 与 SkillLoader 冒烟测试入口
     ├── context/
     │   ├── Compactor.java         # 请求模型前的上下文水位监控与压缩器
@@ -48,11 +50,13 @@ go-tiny-claw/
     ├── schema/
     │   └── Schema.java            # 统一消息、工具调用、工具结果、工具定义
     └── tools/
+        ├── AgentRunner.java       # SubagentTool 拉起引擎子循环的抽象接口
         ├── BaseTool.java          # 所有本地工具的统一接口
         ├── BashTool.java          # 以 WorkDir 为默认目录执行终端命令
         ├── EditFileTool.java      # 对现有文件做局部字符串替换
         ├── ReadFileTool.java      # 读取工作区文件的真实工具
         ├── Registry.java          # 工具注册表接口
+        ├── SubagentTool.java      # 将深度探索任务委派给隔离子智能体
         ├── ToolRegistry.java      # 动态工具注册与分发
         └── WriteFileTool.java     # 创建或覆盖写入工作区文件
 ```
@@ -65,6 +69,7 @@ go-tiny-claw/
 - `Registry` 抽象工具注册与分发：`register(tool)`、`getAvailableTools()` 和 `execute(call)`。
 - `AgentEngine` 维护 ReAct 主循环：Reasoning -> Action -> Observation。
 - `AgentEngine` 支持 Plan Mode，通过 System Prompt 强制 Agent 将长程任务计划写入 `PLAN.md` / `TODO.md`。
+- `AgentEngine` 实现 `AgentRunner`，支持 `SubagentTool` 拉起一次性隔离子循环。
 - `ReminderInjector` 监控连续同参工具失败，达到阈值后注入 `[SYSTEM REMINDER]` 打断 Doom Loop。
 - `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
 - `Session` 保存一次持续对话的历史消息，并通过 `getWorkingMemory(limit)` 提取短期工作记忆。
@@ -81,6 +86,7 @@ go-tiny-claw/
 - `WriteFileTool` 创建或覆盖写入 `WorkDir` 内文件，并自动创建父目录。
 - `EditFileTool` 对现有文件做局部替换，要求 `old_text` 唯一匹配，并提供换行/缩进容错。
 - `BashTool` 以 `WorkDir` 为默认目录执行终端命令，带 30 秒超时、非 0 退出回传和 8000 字节截断。
+- `SubagentTool` 暴露 `spawn_subagent` 给主 Agent，用只读 Registry 执行深度探索并返回精简报告。
 
 ## 慢思考模式
 
@@ -273,6 +279,25 @@ mvn -q "-Dmain.class=lab.agentharness.claw.CompactorSmokeTest" exec:java
 ```
 
 这个入口会在项目根目录生成一个 4000 字符的 `mock_log.txt`，要求 Agent 使用 `read_file` 读取它。工具结果写回 Session 后，下一轮推理前会触发 `Compactor` 日志，验证大 Observation 被截断后再交给模型。
+
+## Subagent 多智能体委派
+
+`SubagentTool` 暴露 `spawn_subagent` 给主 Agent，用来把“大范围阅读、搜索、探索”这类脏活委派给一个隔离的 Explorer Subagent。子智能体拥有独立 `contextHistory`，最多运行 10 轮，只拿到调用方传入的只读 `Registry`，因此不会把大量探索日志污染主 Agent 的 Session。
+
+核心装配思路：
+
+1. `AgentRunner` 是 `tools` 包和 `engine` 包之间的解耦接口，避免工具层直接依赖具体引擎实现。
+2. `AgentEngine` 实现 `runSub(...)`，为子智能体创建一次性上下文，并强制它使用工具查证后输出精简报告。
+3. 主 Registry 可以注册完整工具集以及 `SubagentTool`；子 Registry 只注册 `read_file` 和 `bash`。
+4. 子智能体的工具调用会通过 Reporter 加上 `[Subagent]` 前缀，终端能看清主 Agent 与子 Agent 的分工。
+
+可以用真实 Provider 跑多智能体协同测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.SubagentSmokeTest" exec:java
+```
+
+这个入口会创建 `workspace/legacy/v1/auth/config.txt`，要求主 Agent 必须派出子智能体去寻找 `config.txt`。子智能体读取密码并返回探索报告后，主 Agent 再亲自使用 `write_file` 把结果写入 `workspace/answer.txt`。更完整的设计说明见 [docs/subagent.md](docs/subagent.md)。
 
 ## 飞书长连接机器人
 
