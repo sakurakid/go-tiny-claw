@@ -14,6 +14,7 @@ import java.util.logging.Logger;
 
 import lab.agentharness.context.Compactor;
 import lab.agentharness.context.PromptComposer;
+import lab.agentharness.context.RecoveryManager;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.schema.Schema;
 import lab.agentharness.tools.Registry;
@@ -37,6 +38,7 @@ public final class AgentEngine {
     private final boolean planMode;
     private final PromptComposer composer;
     private final Compactor compactor;
+    private final RecoveryManager recoveryManager;
     private final Function<Path, Registry> sessionRegistryFactory;
 
     public AgentEngine(LLMProvider provider, Registry registry, Path workDir, boolean enableThinking) {
@@ -51,6 +53,7 @@ public final class AgentEngine {
         this.planMode = planMode;
         this.composer = new PromptComposer(this.workDir, this.planMode);
         this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
+        this.recoveryManager = RecoveryManager.newRecoveryManager();
         this.sessionRegistryFactory = ignored -> this.registry;
     }
 
@@ -66,6 +69,7 @@ public final class AgentEngine {
         this.planMode = planMode;
         this.composer = null;
         this.compactor = Compactor.newCompactor(COMPACTION_MAX_CHARS, COMPACTION_RETAIN_LAST_MESSAGES);
+        this.recoveryManager = RecoveryManager.newRecoveryManager();
         this.sessionRegistryFactory = Objects.requireNonNull(sessionRegistryFactory, "sessionRegistryFactory");
     }
 
@@ -290,23 +294,27 @@ public final class AgentEngine {
                     () -> reporter.onToolCall(toolCall.name(), String.valueOf(toolCall.arguments())));
 
             Schema.ToolResult result = activeRegistry.execute(toolCall);
+            String finalOutput = result.output();
             if (result.isError()) {
-                LOG.warning("  -> [Tool-" + index + "] 工具执行报错: " + result.output());
+                finalOutput = recoveryManager.analyzeAndInject(toolCall.name(), result.output());
+                LOG.warning("  -> [Tool-" + index + "] 工具执行报错，已尝试注入救援指南: " + finalOutput);
             } else {
                 LOG.info("  -> [Tool-" + index + "] 工具执行成功 (返回 " + bytes(result.output()) + " 字节)");
             }
-            String displayOutput = truncateForReporter(result.output());
+            String displayOutput = truncateForReporter(finalOutput);
             callReporter(reporter, "onToolResult",
                     () -> reporter.onToolResult(toolCall.name(), displayOutput, result.isError()));
 
-            return Schema.Message.observation(toolCall.id(), result.output());
+            return Schema.Message.observation(toolCall.id(), finalOutput);
         } catch (CompletionException e) {
             throw e;
         } catch (RuntimeException e) {
             String output = "Error executing " + toolCall.name() + ": " + e.getMessage();
-            LOG.warning("  -> [Tool-" + index + "] 工具执行异常: " + output);
+            output = recoveryManager.analyzeAndInject(toolCall.name(), output);
+            LOG.warning("  -> [Tool-" + index + "] 工具执行异常，已尝试注入救援指南: " + output);
+            String displayOutput = truncateForReporter(output);
             callReporter(reporter, "onToolResult",
-                    () -> reporter.onToolResult(toolCall.name(), output, true));
+                    () -> reporter.onToolResult(toolCall.name(), displayOutput, true));
             return Schema.Message.observation(toolCall.id(), output);
         }
     }

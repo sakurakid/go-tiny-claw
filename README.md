@@ -20,11 +20,13 @@ go-tiny-claw/
     │   ├── PlanModeSmokeTest.java # Plan Mode 长程任务与断点续传测试入口
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
     │   ├── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
+    │   ├── RecoverySmokeTest.java # 工具失败自愈提示注入测试入口
     │   ├── SessionMemorySmokeTest.java # 多 Session 与 Working Memory 冒烟测试入口
     │   └── SkillPromptSmokeTest.java # PromptComposer 与 SkillLoader 冒烟测试入口
     ├── context/
     │   ├── Compactor.java         # 请求模型前的上下文水位监控与压缩器
     │   ├── PromptComposer.java    # 动态组装 System Prompt
+    │   ├── RecoveryManager.java   # 工具错误分析与系统救援指南注入
     │   ├── Skill.java             # 标准化技能结构
     │   └── SkillLoader.java       # 扫描并解析 .claw/skills/**/SKILL.md
     ├── engine/
@@ -66,6 +68,7 @@ go-tiny-claw/
 - `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
 - `PromptComposer` 动态组装 System Prompt：核心纪律、`AGENTS.md` 和 `.claw/skills/**/SKILL.md`。
 - `Compactor` 在请求大模型前估算上下文字符数，必要时掩码远期大输出并截断近期超大 Observation。
+- `RecoveryManager` 在工具失败时分析错误特征，并把恢复建议注入 Observation，引导模型自我纠偏。
 - `SkillLoader` 解析标准 Skill Markdown，支持 `name` 和 `description` YAML Frontmatter。
 - `FeishuBot` 使用飞书官方 Java SDK 的 WebSocket 长连接模式监听用户消息，不需要公网回调地址。
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
@@ -179,6 +182,25 @@ mvn -q "-Dmain.class=lab.agentharness.claw.SessionMemorySmokeTest" exec:java
 ```
 
 这个入口会生成两个本地工作区：`workspace_sessions/project_front` 和 `workspace_sessions/project_back`。前端 Session 会先读取 `README.md` 中的 `token_12345`，再用多轮闲聊把它挤出 Working Memory；后端 Session 会同时运行并验证自己看不到前端 Session 的历史。
+
+## Recovery 错误自愈
+
+`RecoveryManager` 用来把工具失败从“裸错误”升级成“带下一步行动建议的 Observation”。它不会吞掉错误，也不会替模型重试，而是在 `AgentEngine` 收到失败的 `ToolResult` 后，根据工具名和错误文本注入 `[系统救援指南]`。
+
+当前覆盖的典型场景：
+
+1. `edit_file` 的 `old_text` 不匹配：提示先 `read_file` 获取最新内容后再编辑。
+2. `edit_file` 命中多处：提示增加上下文代码，确保唯一匹配。
+3. `read_file` / `write_file` 路径错误或越界：提示先用 `bash` 查看目录结构。
+4. `bash` 命令不存在、语法错误、超时或非 0 退出：提示换用当前系统可用命令，或先做更小范围检查。
+
+可以用真实 Provider 跑自愈测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.RecoverySmokeTest" exec:java
+```
+
+这个入口会在 `workspace/auth.java` 写入一个带复杂缩进的测试文件，然后诱导模型先用错误的 `old_text` 调用 `edit_file`。失败结果会带上 `[系统救援指南]`，模型随后应转向读取文件并重新编辑。
 
 ## Plan Mode 长程任务
 
