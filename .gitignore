@@ -3,6 +3,8 @@ target/
 *.class
 workspace/*.java
 workspace/*.go
+workspace/answer.txt
+workspace/legacy/
 workspace_sessions/
 workspace_plan/
 mock_log.txt

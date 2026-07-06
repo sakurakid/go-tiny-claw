@@ -17,13 +17,14 @@ import lab.agentharness.context.PromptComposer;
 import lab.agentharness.context.RecoveryManager;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.schema.Schema;
+import lab.agentharness.tools.AgentRunner;
 import lab.agentharness.tools.Registry;
 import lab.agentharness.tools.ToolRegistry;
 
 /**
  * AgentEngine 是 go-tiny-claw 的微型 OS 核心驱动，负责维持标准 ReAct 主循环。
  */
-public final class AgentEngine {
+public final class AgentEngine implements AgentRunner {
     private static final Logger LOG = Logger.getLogger(AgentEngine.class.getName());
     private static final int DEFAULT_MAX_TURNS = 12;
     private static final int PLAN_MODE_MAX_TURNS = 32;
@@ -106,6 +107,54 @@ public final class AgentEngine {
 
     public boolean planMode() {
         return planMode;
+    }
+
+    /**
+     * RunSub 为 SubagentTool 启动一个一次性隔离子循环，只能使用调用方传入的受限 Registry。
+     */
+    @Override
+    public String runSub(String taskPrompt, Registry readOnlyRegistry, Object reporter) {
+        Objects.requireNonNull(taskPrompt, "taskPrompt");
+        Objects.requireNonNull(readOnlyRegistry, "readOnlyRegistry");
+
+        Reporter subReporter = reporter instanceof Reporter casted ? casted : null;
+        List<Schema.Message> contextHistory = new ArrayList<>();
+        contextHistory.add(Schema.Message.system("""
+                你是一个专门负责深度探索的探路者 (Explorer Subagent)。
+                你的任务是根据主架构师的指令，在当前工作区内仔细阅读代码、查阅文件、搜索线索，并返回一段高度压缩的探索报告。
+
+                【核心纪律】
+                1. 你必须依靠内置工具寻找答案，禁止凭空猜测。
+                2. 你只能执行探索和读取，不要尝试修改、创建或删除文件。
+                3. 如果没有找到确切答案，继续使用 read_file 或 bash 搜索。
+                4. 找到明确线索后，停止调用工具，直接输出纯文本汇报。汇报要短、准、可供主 Agent 继续决策。
+                """));
+        contextHistory.add(Schema.Message.user(taskPrompt));
+
+        int maxSubTurns = 10;
+        for (int turn = 1; turn <= maxSubTurns; turn++) {
+            LOG.info("[Subagent] ========== [Turn " + turn + "] 开始 ==========");
+            Schema.Message actionResp = provider.generate(
+                    compactForProvider(contextHistory),
+                    readOnlyRegistry.getAvailableTools());
+            if (actionResp == null) {
+                throw new IllegalStateException("子智能体 Action 阶段模型返回空消息。");
+            }
+
+            contextHistory.add(actionResp);
+            if (!actionResp.hasToolCalls()) {
+                String summary = actionResp.content();
+                return summary == null || summary.isBlank()
+                        ? "子智能体没有返回有效摘要。"
+                        : summary;
+            }
+
+            List<ToolExecution> executions =
+                    executeToolCallsInParallel(readOnlyRegistry, actionResp.toolCalls(), prefixReporter(subReporter));
+            contextHistory.addAll(observations(executions));
+        }
+
+        throw new IllegalStateException("子智能体探索过于深入，超过 " + maxSubTurns + " 轮被强制召回，请给它更明确的指令。");
     }
 
     /**
@@ -343,6 +392,34 @@ public final class AgentEngine {
             }
         }
         return reminders;
+    }
+
+    private Reporter prefixReporter(Reporter reporter) {
+        if (reporter == null) {
+            return null;
+        }
+
+        return new Reporter() {
+            @Override
+            public void onThinking() {
+                reporter.onThinking();
+            }
+
+            @Override
+            public void onToolCall(String toolName, String args) {
+                reporter.onToolCall("[Subagent] " + toolName, args);
+            }
+
+            @Override
+            public void onToolResult(String toolName, String result, boolean isError) {
+                reporter.onToolResult("[Subagent] " + toolName, result, isError);
+            }
+
+            @Override
+            public void onMessage(String content) {
+                reporter.onMessage("[Subagent]\n" + content);
+            }
+        };
     }
 
     private static void callReporter(Reporter reporter, String eventName, Runnable event) {

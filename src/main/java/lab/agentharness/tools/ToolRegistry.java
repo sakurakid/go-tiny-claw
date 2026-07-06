@@ -29,6 +29,13 @@ public final class ToolRegistry implements Registry {
         return registry;
     }
 
+    public static ToolRegistry readOnlyRegistry(java.nio.file.Path workspace) {
+        ToolRegistry registry = newRegistry();
+        registry.register(new ReadFileTool(workspace));
+        registry.register(new BashTool(workspace));
+        return registry;
+    }
+
     @Override
     public void register(BaseTool tool) {
         Objects.requireNonNull(tool, "tool");
