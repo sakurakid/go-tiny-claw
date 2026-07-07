@@ -183,7 +183,15 @@ public final class AnthropicCompatibleProvider implements LLMProvider {
             }
         }
 
-        return Schema.Message.assistant(content.toString(), calls);
+        Schema.Message result = Schema.Message.assistant(content.toString(), calls);
+        JsonNode usage = response.path("usage");
+        int promptTokens = usage.path("input_tokens").asInt(0);
+        int completionTokens = usage.path("output_tokens").asInt(0);
+        if (promptTokens > 0 || completionTokens > 0) {
+            result = result.withUsage(new Schema.Usage(promptTokens, completionTokens));
+        }
+
+        return result;
     }
 
     private static JsonNode parseJsonObject(Schema.RawJson rawJson) {

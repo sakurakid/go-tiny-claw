@@ -164,7 +164,15 @@ public final class OpenAICompatibleProvider implements LLMProvider {
             }
         }
 
-        return Schema.Message.assistant(content, calls);
+        Schema.Message result = Schema.Message.assistant(content, calls);
+        JsonNode usage = response.path("usage");
+        int promptTokens = usage.path("prompt_tokens").asInt(0);
+        int completionTokens = usage.path("completion_tokens").asInt(0);
+        if (promptTokens > 0 || completionTokens > 0) {
+            result = result.withUsage(new Schema.Usage(promptTokens, completionTokens));
+        }
+
+        return result;
     }
 
     private static JsonNode parseJsonObject(Schema.RawJson rawJson) {

@@ -21,6 +21,9 @@ public final class Session {
     private final List<Schema.Message> history;
     private final ReentrantReadWriteLock lock;
     private Instant updatedAt;
+    private int totalPromptTokens;
+    private int totalCompletionTokens;
+    private double totalCostCny;
 
     public Session(String id, Path workDir) {
         this.id = requireText(id, "id");
@@ -29,6 +32,9 @@ public final class Session {
         this.updatedAt = createdAt;
         this.history = new ArrayList<>();
         this.lock = new ReentrantReadWriteLock();
+        this.totalPromptTokens = 0;
+        this.totalCompletionTokens = 0;
+        this.totalCostCny = 0.0;
     }
 
     public String id() {
@@ -49,6 +55,48 @@ public final class Session {
             return updatedAt;
         } finally {
             lock.readLock().unlock();
+        }
+    }
+
+    public int totalPromptTokens() {
+        lock.readLock().lock();
+        try {
+            return totalPromptTokens;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    public int totalCompletionTokens() {
+        lock.readLock().lock();
+        try {
+            return totalCompletionTokens;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    public double totalCostCny() {
+        lock.readLock().lock();
+        try {
+            return totalCostCny;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    /**
+     * 线程安全地累计当前会话的大模型资源账单。
+     */
+    public void recordUsage(int promptTokens, int completionTokens, double costCny) {
+        lock.writeLock().lock();
+        try {
+            this.totalPromptTokens += Math.max(0, promptTokens);
+            this.totalCompletionTokens += Math.max(0, completionTokens);
+            this.totalCostCny += Math.max(0.0, costCny);
+            this.updatedAt = Instant.now();
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 

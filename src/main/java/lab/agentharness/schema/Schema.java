@@ -31,7 +31,11 @@ public final class Schema {
     /**
      * 上下文中的单条消息，可表示系统提示、用户任务、模型回复或工具 Observation。
      */
-    public record Message(Role role, String content, List<ToolCall> toolCalls, String toolCallId) {
+    public record Message(Role role, String content, List<ToolCall> toolCalls, String toolCallId, Usage usage) {
+        public Message(Role role, String content, List<ToolCall> toolCalls, String toolCallId) {
+            this(role, content, toolCalls, toolCallId, null);
+        }
+
         public Message {
             toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
         }
@@ -58,6 +62,19 @@ public final class Schema {
 
         public boolean hasToolCalls() {
             return !toolCalls.isEmpty();
+        }
+
+        public Message withUsage(Usage usage) {
+            return new Message(role, content, toolCalls, toolCallId, usage);
+        }
+    }
+
+    /**
+     * 大模型 API 返回的资源消耗元数据，用于可观测性和成本统计。
+     */
+    public record Usage(int promptTokens, int completionTokens) {
+        public int totalTokens() {
+            return promptTokens + completionTokens;
         }
     }
 

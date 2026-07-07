@@ -12,6 +12,7 @@ go-tiny-claw/
 ├── README.md
 ├── docs/
 │   ├── main-loop-and-schema.md
+│   ├── observability.md
 │   └── subagent.md
 └── src/main/java/lab/agentharness/
     ├── claw/
@@ -19,6 +20,7 @@ go-tiny-claw/
     │   ├── DoomLoopReminderSmokeTest.java # Doom Loop 动态提醒干预测试入口
     │   ├── FeishuMain.java        # 飞书长连接启动入口，适合本地开发接入机器人
     │   ├── Main.java              # Demo 入口，装配真实 Provider、ToolRegistry、AgentEngine
+    │   ├── ObservabilitySmokeTest.java # Token、耗时与费用统计测试入口
     │   ├── PlanModeSmokeTest.java # Plan Mode 长程任务与断点续传测试入口
     │   ├── ProviderThinkingCompare.java # 真实 Provider 慢思考对比入口
     │   ├── ProviderSmokeTest.java # 真实 Provider 冒烟测试入口
@@ -42,6 +44,8 @@ go-tiny-claw/
     ├── feishu/
     │   ├── FeishuBot.java         # 飞书长连接事件监听与 Agent 任务桥接
     │   └── FeishuReporter.java    # 将 Agent 状态发送回飞书会话
+    ├── observability/
+    │   └── CostTracker.java       # Provider 装饰器，统计耗时、Token 与会话费用
     ├── provider/
     │   ├── AnthropicCompatibleProvider.java # Anthropic-compatible 协议适配器
     │   ├── LLMProvider.java                 # LLM Provider 接口
@@ -73,7 +77,9 @@ go-tiny-claw/
 - `ReminderInjector` 监控连续同参工具失败，达到阈值后注入 `[SYSTEM REMINDER]` 打断 Doom Loop。
 - `Reporter` 抽象引擎输出：`onThinking / onToolCall / onToolResult / onMessage`。
 - `Session` 保存一次持续对话的历史消息，并通过 `getWorkingMemory(limit)` 提取短期工作记忆。
+- `Session` 累计当前会话的大模型输入 Token、输出 Token 和人民币估算费用。
 - `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
+- `CostTracker` 作为 `LLMProvider` 装饰器包住真实 Provider，统计 API 耗时、Usage 和费用。
 - `PromptComposer` 动态组装 System Prompt：核心纪律、`AGENTS.md` 和 `.claw/skills/**/SKILL.md`。
 - `Compactor` 在请求大模型前估算上下文字符数，必要时掩码远期大输出并截断近期超大 Observation。
 - `RecoveryManager` 在工具失败时分析错误特征，并把恢复建议注入 Observation，引导模型自我纠偏。
@@ -82,6 +88,7 @@ go-tiny-claw/
 - `enableThinking` 支持慢思考模式：先剥夺工具规划，再恢复工具执行。
 - `OpenAICompatibleProvider` 支持 DeepSeek / 智谱等 OpenAI-compatible 服务。
 - `AnthropicCompatibleProvider` 支持 Claude / 兼容 Anthropic Messages API 的服务。
+- `OpenAICompatibleProvider` 和 `AnthropicCompatibleProvider` 会透传 API 原生 Usage 数据。
 - `ReadFileTool` 读取 `WorkDir` 内文件，并做路径边界校验与 8000 字节截断。
 - `WriteFileTool` 创建或覆盖写入 `WorkDir` 内文件，并自动创建父目录。
 - `EditFileTool` 对现有文件做局部替换，要求 `old_text` 唯一匹配，并提供换行/缩进容错。
@@ -279,6 +286,26 @@ mvn -q "-Dmain.class=lab.agentharness.claw.CompactorSmokeTest" exec:java
 ```
 
 这个入口会在项目根目录生成一个 4000 字符的 `mock_log.txt`，要求 Agent 使用 `read_file` 读取它。工具结果写回 Session 后，下一轮推理前会触发 `Compactor` 日志，验证大 Observation 被截断后再交给模型。
+
+## Observability 费用监控
+
+`CostTracker` 用装饰器模式包住真实 `LLMProvider`，让 `AgentEngine` 不需要知道费用统计的存在。每次模型调用都会先进入 Tracker，再转发给真实 Provider；Provider 从 API 原生响应里解析 Usage，Tracker 再计算耗时、Token 和费用。
+
+当前数据流：
+
+1. `OpenAICompatibleProvider` 读取 `usage.prompt_tokens` / `usage.completion_tokens`。
+2. `AnthropicCompatibleProvider` 读取 `usage.input_tokens` / `usage.output_tokens`。
+3. `Schema.Message` 通过 `Usage` 字段承接本次模型调用的输入/输出 Token。
+4. `CostTracker` 根据模型价格表估算人民币费用，并调用 `Session.recordUsage(...)` 累加到会话账本。
+5. 任务结束后可以从 Session 读取累计输入 Token、累计输出 Token 和累计费用。
+
+可以用真实 Provider 跑监控测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.ObservabilitySmokeTest" exec:java
+```
+
+这个入口只挂载 `bash` 工具，要求模型执行 `date` 命令。日志会打印每次 API 调用的耗时、输入 Token、输出 Token、估算费用，以及最终会话级财务报表。更完整的设计说明见 [docs/observability.md](docs/observability.md)。
 
 ## Subagent 多智能体委派
 

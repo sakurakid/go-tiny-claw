@@ -126,7 +126,7 @@ public final class Compactor {
     }
 
     private static Schema.Message withContent(Schema.Message message, String content) {
-        return new Schema.Message(message.role(), content, message.toolCalls(), message.toolCallId());
+        return new Schema.Message(message.role(), content, message.toolCalls(), message.toolCallId(), message.usage());
     }
 
     private static int safeLength(String value) {
