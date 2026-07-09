@@ -11,6 +11,7 @@ go-tiny-claw/
 ├── pom.xml
 ├── README.md
 ├── docs/
+│   ├── interview-playbook.md
 │   ├── main-loop-and-schema.md
 │   ├── observability.md
 │   └── subagent.md
