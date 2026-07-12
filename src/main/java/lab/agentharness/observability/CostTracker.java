@@ -72,6 +72,15 @@ public final class CostTracker implements LLMProvider {
         int promptTokens = response.usage().promptTokens();
         int completionTokens = response.usage().completionTokens();
         double costCny = estimateCostCny(promptTokens, completionTokens);
+        Trace.Span currentSpan = Trace.currentSpan();
+        if (currentSpan != null) {
+            currentSpan.addAttribute("provider", nextProvider.name());
+            currentSpan.addAttribute("model", modelName);
+            currentSpan.addAttribute("prompt_tokens", promptTokens);
+            currentSpan.addAttribute("completion_tokens", completionTokens);
+            currentSpan.addAttribute("total_tokens", response.usage().totalTokens());
+            currentSpan.addAttribute("estimated_cost_cny", costCny);
+        }
 
         LOG.info(String.format(Locale.ROOT,
                 "[Tracker] API 调用完成 | 耗时: %s | 输入: %d tk | 输出: %d tk | 估算费用: CNY %.6f",

@@ -14,7 +14,8 @@ go-tiny-claw/
 │   ├── interview-playbook.md
 │   ├── main-loop-and-schema.md
 │   ├── observability.md
-│   └── subagent.md
+│   ├── subagent.md
+│   └── tracing.md
 └── src/main/java/lab/agentharness/
     ├── claw/
     │   ├── CompactorSmokeTest.java # 上下文压缩器真实 Provider 冒烟测试入口
@@ -28,6 +29,7 @@ go-tiny-claw/
     │   ├── RecoverySmokeTest.java # 工具失败自愈提示注入测试入口
     │   ├── SessionMemorySmokeTest.java # 多 Session 与 Working Memory 冒烟测试入口
     │   ├── SubagentSmokeTest.java # 主 Agent 委派只读子智能体的协同测试入口
+    │   ├── TraceSmokeTest.java # 链路追踪决策树测试入口
     │   └── SkillPromptSmokeTest.java # PromptComposer 与 SkillLoader 冒烟测试入口
     ├── context/
     │   ├── Compactor.java         # 请求模型前的上下文水位监控与压缩器
@@ -46,7 +48,8 @@ go-tiny-claw/
     │   ├── FeishuBot.java         # 飞书长连接事件监听与 Agent 任务桥接
     │   └── FeishuReporter.java    # 将 Agent 状态发送回飞书会话
     ├── observability/
-    │   └── CostTracker.java       # Provider 装饰器，统计耗时、Token 与会话费用
+    │   ├── CostTracker.java       # Provider 装饰器，统计耗时、Token 与会话费用
+    │   └── Trace.java             # Run / Turn / LLM / Tool 的链路追踪树
     ├── provider/
     │   ├── AnthropicCompatibleProvider.java # Anthropic-compatible 协议适配器
     │   ├── LLMProvider.java                 # LLM Provider 接口
@@ -81,6 +84,7 @@ go-tiny-claw/
 - `Session` 累计当前会话的大模型输入 Token、输出 Token 和人民币估算费用。
 - `SessionManager` 按会话 ID 隔离不同用户、终端或群聊的上下文状态。
 - `CostTracker` 作为 `LLMProvider` 装饰器包住真实 Provider，统计 API 耗时、Usage 和费用。
+- `Trace` 将每次 Agent 执行导出为 JSON 决策树，便于回放 Run、Turn、LLM 与 Tool 耗时。
 - `PromptComposer` 动态组装 System Prompt：核心纪律、`AGENTS.md` 和 `.claw/skills/**/SKILL.md`。
 - `Compactor` 在请求大模型前估算上下文字符数，必要时掩码远期大输出并截断近期超大 Observation。
 - `RecoveryManager` 在工具失败时分析错误特征，并把恢复建议注入 Observation，引导模型自我纠偏。
@@ -307,6 +311,30 @@ mvn -q "-Dmain.class=lab.agentharness.claw.ObservabilitySmokeTest" exec:java
 ```
 
 这个入口只挂载 `bash` 工具，要求模型执行 `date` 命令。日志会打印每次 API 调用的耗时、输入 Token、输出 Token、估算费用，以及最终会话级财务报表。更完整的设计说明见 [docs/observability.md](docs/observability.md)。
+
+## Tracing 决策树追踪
+
+`Trace` 用来把一次 Agent 执行保存成可回放的 JSON 决策树。它会记录根任务、每一轮 Turn、每次模型调用和每次工具执行，并附带耗时、上下文规模、工具参数、输出摘要和 token 等元数据。
+
+当前典型结构：
+
+```text
+Agent.Run
+  └── Turn-1
+      ├── LLM.Action
+      ├── Tool.Execute (bash)
+      └── Tool.Execute (write_file)
+```
+
+Java 版没有 Go 的 `context.Context`，因此项目用 `ThreadLocal` 保存当前 Span；并发工具执行时由 `AgentEngine` 显式把当前 Turn Span 传给线程池任务，保证多个工具 Span 会平行挂在同一个 Turn 下面。
+
+可以用真实 Provider 跑链路追踪测试：
+
+```bash
+mvn -q "-Dmain.class=lab.agentharness.claw.TraceSmokeTest" exec:java
+```
+
+测试完成后，Trace JSON 会生成在 `workspace/.claw/traces/`。该目录已加入 `.gitignore`。更完整的设计说明见 [docs/tracing.md](docs/tracing.md)。
 
 ## Subagent 多智能体委派
 

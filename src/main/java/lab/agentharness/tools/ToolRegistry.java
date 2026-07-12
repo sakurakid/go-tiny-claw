@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Logger;
 
+import lab.agentharness.observability.Trace;
 import lab.agentharness.schema.Schema;
 
 /**
@@ -56,16 +57,35 @@ public final class ToolRegistry implements Registry {
 
     @Override
     public Schema.ToolResult execute(Schema.ToolCall call) {
-        BaseTool tool = tools.get(call.name());
-        if (tool == null) {
-            return Schema.ToolResult.error(call.id(), "Error: 系统中不存在名为 '" + call.name() + "' 的工具。");
-        }
+        try (Trace.Span span = Trace.startSpan("Tool.Execute")) {
+            span.addAttribute("tool_name", call.name());
+            span.addAttribute("arguments", String.valueOf(call.arguments()));
 
-        try {
-            String output = tool.execute(call.arguments());
-            return Schema.ToolResult.ok(call.id(), output);
-        } catch (Exception e) {
-            return Schema.ToolResult.error(call.id(), "Error executing " + call.name() + ": " + e.getMessage());
+            BaseTool tool = tools.get(call.name());
+            if (tool == null) {
+                String output = "Error: 系统中不存在名为 '" + call.name() + "' 的工具。";
+                span.addAttribute("error", output);
+                return Schema.ToolResult.error(call.id(), output);
+            }
+
+            try {
+                String output = tool.execute(call.arguments());
+                span.addAttribute("output_preview", truncate(output, 100));
+                span.addAttribute("output_chars", output == null ? 0 : output.length());
+                return Schema.ToolResult.ok(call.id(), output);
+            } catch (Exception e) {
+                String output = "Error executing " + call.name() + ": " + e.getMessage();
+                span.addAttribute("error", e.getMessage());
+                span.addAttribute("output_preview", truncate(output, 100));
+                return Schema.ToolResult.error(call.id(), output);
+            }
         }
+    }
+
+    private static String truncate(String text, int maxChars) {
+        if (text == null || text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, maxChars) + "...";
     }
 }

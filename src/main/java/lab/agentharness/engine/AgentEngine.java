@@ -15,6 +15,7 @@ import java.util.logging.Logger;
 import lab.agentharness.context.Compactor;
 import lab.agentharness.context.PromptComposer;
 import lab.agentharness.context.RecoveryManager;
+import lab.agentharness.observability.Trace;
 import lab.agentharness.provider.LLMProvider;
 import lab.agentharness.schema.Schema;
 import lab.agentharness.tools.AgentRunner;
@@ -117,44 +118,59 @@ public final class AgentEngine implements AgentRunner {
         Objects.requireNonNull(taskPrompt, "taskPrompt");
         Objects.requireNonNull(readOnlyRegistry, "readOnlyRegistry");
 
-        Reporter subReporter = reporter instanceof Reporter casted ? casted : null;
-        List<Schema.Message> contextHistory = new ArrayList<>();
-        contextHistory.add(Schema.Message.system("""
-                你是一个专门负责深度探索的探路者 (Explorer Subagent)。
-                你的任务是根据主架构师的指令，在当前工作区内仔细阅读代码、查阅文件、搜索线索，并返回一段高度压缩的探索报告。
+        Trace.Span subSpan = Trace.startSpan("Subagent.Run");
+        subSpan.addAttribute("task_prompt_preview", truncateForReporter(taskPrompt));
+        try {
+            Reporter subReporter = reporter instanceof Reporter casted ? casted : null;
+            List<Schema.Message> contextHistory = new ArrayList<>();
+            contextHistory.add(Schema.Message.system("""
+                    你是一个专门负责深度探索的探路者 (Explorer Subagent)。
+                    你的任务是根据主架构师的指令，在当前工作区内仔细阅读代码、查阅文件、搜索线索，并返回一段高度压缩的探索报告。
 
-                【核心纪律】
-                1. 你必须依靠内置工具寻找答案，禁止凭空猜测。
-                2. 你只能执行探索和读取，不要尝试修改、创建或删除文件。
-                3. 如果没有找到确切答案，继续使用 read_file 或 bash 搜索。
-                4. 找到明确线索后，停止调用工具，直接输出纯文本汇报。汇报要短、准、可供主 Agent 继续决策。
-                """));
-        contextHistory.add(Schema.Message.user(taskPrompt));
+                    【核心纪律】
+                    1. 你必须依靠内置工具寻找答案，禁止凭空猜测。
+                    2. 你只能执行探索和读取，不要尝试修改、创建或删除文件。
+                    3. 如果没有找到确切答案，继续使用 read_file 或 bash 搜索。
+                    4. 找到明确线索后，停止调用工具，直接输出纯文本汇报。汇报要短、准、可供主 Agent 继续决策。
+                    """));
+            contextHistory.add(Schema.Message.user(taskPrompt));
 
-        int maxSubTurns = 10;
-        for (int turn = 1; turn <= maxSubTurns; turn++) {
-            LOG.info("[Subagent] ========== [Turn " + turn + "] 开始 ==========");
-            Schema.Message actionResp = provider.generate(
-                    compactForProvider(contextHistory),
-                    readOnlyRegistry.getAvailableTools());
-            if (actionResp == null) {
-                throw new IllegalStateException("子智能体 Action 阶段模型返回空消息。");
+            int maxSubTurns = 10;
+            for (int turn = 1; turn <= maxSubTurns; turn++) {
+                try (Trace.Span turnSpan = Trace.startSpan("Subagent.Turn-" + turn)) {
+                    turnSpan.addAttribute("turn", turn);
+                    turnSpan.addAttribute("history_message_count", contextHistory.size());
+                    LOG.info("[Subagent] ========== [Turn " + turn + "] 开始 ==========");
+                    Schema.Message actionResp = generateWithTrace(
+                            "LLM.SubagentAction",
+                            compactForProvider(contextHistory),
+                            readOnlyRegistry.getAvailableTools());
+                    if (actionResp == null) {
+                        throw new IllegalStateException("子智能体 Action 阶段模型返回空消息。");
+                    }
+
+                    contextHistory.add(actionResp);
+                    turnSpan.addAttribute("tool_call_count", actionResp.toolCalls().size());
+                    if (!actionResp.hasToolCalls()) {
+                        String summary = actionResp.content();
+                        return summary == null || summary.isBlank()
+                                ? "子智能体没有返回有效摘要。"
+                                : summary;
+                    }
+
+                    List<ToolExecution> executions =
+                            executeToolCallsInParallel(readOnlyRegistry, actionResp.toolCalls(), prefixReporter(subReporter));
+                    contextHistory.addAll(observations(executions));
+                }
             }
 
-            contextHistory.add(actionResp);
-            if (!actionResp.hasToolCalls()) {
-                String summary = actionResp.content();
-                return summary == null || summary.isBlank()
-                        ? "子智能体没有返回有效摘要。"
-                        : summary;
-            }
-
-            List<ToolExecution> executions =
-                    executeToolCallsInParallel(readOnlyRegistry, actionResp.toolCalls(), prefixReporter(subReporter));
-            contextHistory.addAll(observations(executions));
+            throw new IllegalStateException("子智能体探索过于深入，超过 " + maxSubTurns + " 轮被强制召回，请给它更明确的指令。");
+        } catch (RuntimeException e) {
+            subSpan.addAttribute("error", e.getMessage());
+            throw e;
+        } finally {
+            subSpan.close();
         }
-
-        throw new IllegalStateException("子智能体探索过于深入，超过 " + maxSubTurns + " 轮被强制召回，请给它更明确的指令。");
     }
 
     /**
@@ -172,57 +188,79 @@ public final class AgentEngine implements AgentRunner {
             throw new IllegalStateException("当前 AgentEngine 未绑定固定工作区，请改用 run(Session, Reporter)。");
         }
 
-        LOG.info("[Engine] 引擎启动，锁定工作区: " + workDir);
-        LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
-        LOG.info("[Engine] 计划模式 (Plan Mode): " + planMode);
+        Trace.Span rootSpan = Trace.startSpan("Agent.Run");
+        rootSpan.addAttribute("session_id", "cli");
+        rootSpan.addAttribute("work_dir", workDir.toString());
+        rootSpan.addAttribute("plan_mode", planMode);
+        rootSpan.addAttribute("enable_thinking", enableThinking);
+        try {
+            LOG.info("[Engine] 引擎启动，锁定工作区: " + workDir);
+            LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
+            LOG.info("[Engine] 计划模式 (Plan Mode): " + planMode);
 
-        List<Schema.Message> contextHistory = new ArrayList<>();
-        contextHistory.add(composer.build());
-        contextHistory.add(Schema.Message.user(userPrompt));
+            List<Schema.Message> contextHistory = new ArrayList<>();
+            contextHistory.add(composer.build());
+            contextHistory.add(Schema.Message.user(userPrompt));
 
-        int turnCount = 0;
-        while (true) {
-            turnCount++;
-            if (turnCount > maxTurns()) {
-                throw new IllegalStateException("Main Loop 超过最大轮数，疑似进入 Doom Loop。");
-            }
-
-            LOG.info("========== [Turn " + turnCount + "] 开始 ==========");
-            List<Schema.ToolDefinition> availableTools = registry.getAvailableTools();
-
-            if (enableThinking) {
-                LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
-                callReporter(reporter, "onThinking", () -> reporter.onThinking());
-                Schema.Message thinkResp = provider.generate(compactForProvider(thinkingContext(contextHistory)), List.of());
-                if (thinkResp == null) {
-                    throw new IllegalStateException("Thinking 阶段模型返回空消息。");
+            int turnCount = 0;
+            while (true) {
+                turnCount++;
+                if (turnCount > maxTurns()) {
+                    throw new IllegalStateException("Main Loop 超过最大轮数，疑似进入 Doom Loop。");
                 }
 
-                if (thinkResp.content() != null && !thinkResp.content().isBlank()) {
-                    contextHistory.add(thinkResp);
+                try (Trace.Span turnSpan = Trace.startSpan("Turn-" + turnCount)) {
+                    turnSpan.addAttribute("turn", turnCount);
+                    LOG.info("========== [Turn " + turnCount + "] 开始 ==========");
+                    List<Schema.ToolDefinition> availableTools = registry.getAvailableTools();
+                    turnSpan.addAttribute("available_tools_count", availableTools.size());
+                    turnSpan.addAttribute("history_message_count", contextHistory.size());
+
+                    if (enableThinking) {
+                        LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
+                        callReporter(reporter, "onThinking", () -> reporter.onThinking());
+                        Schema.Message thinkResp = generateWithTrace(
+                                "LLM.Thinking",
+                                compactForProvider(thinkingContext(contextHistory)),
+                                List.of());
+                        if (thinkResp == null) {
+                            throw new IllegalStateException("Thinking 阶段模型返回空消息。");
+                        }
+
+                        if (thinkResp.content() != null && !thinkResp.content().isBlank()) {
+                            contextHistory.add(thinkResp);
+                        }
+                    }
+
+                    LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
+                    Schema.Message actionResp = generateWithTrace("LLM.Action", compactForProvider(contextHistory), availableTools);
+                    if (actionResp == null) {
+                        throw new IllegalStateException("Action 阶段模型返回空消息。");
+                    }
+
+                    contextHistory.add(actionResp);
+                    turnSpan.addAttribute("tool_call_count", actionResp.toolCalls().size());
+                    if (actionResp.content() != null && !actionResp.content().isBlank()) {
+                        callReporter(reporter, "onMessage", () -> reporter.onMessage(actionResp.content()));
+                    }
+
+                    if (!actionResp.hasToolCalls()) {
+                        LOG.info("[Engine] 模型未请求调用工具，任务宣告完成。");
+                        break;
+                    }
+
+                    List<ToolExecution> executions = executeToolCallsInParallel(registry, actionResp.toolCalls(), reporter);
+                    LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
+                    contextHistory.addAll(observations(executions));
+                    contextHistory.addAll(reminders(executions));
                 }
             }
-
-            LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
-            Schema.Message actionResp = provider.generate(compactForProvider(contextHistory), availableTools);
-            if (actionResp == null) {
-                throw new IllegalStateException("Action 阶段模型返回空消息。");
-            }
-
-            contextHistory.add(actionResp);
-            if (actionResp.content() != null && !actionResp.content().isBlank()) {
-                callReporter(reporter, "onMessage", () -> reporter.onMessage(actionResp.content()));
-            }
-
-            if (!actionResp.hasToolCalls()) {
-                LOG.info("[Engine] 模型未请求调用工具，任务宣告完成。");
-                break;
-            }
-
-            List<ToolExecution> executions = executeToolCallsInParallel(registry, actionResp.toolCalls(), reporter);
-            LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
-            contextHistory.addAll(observations(executions));
-            contextHistory.addAll(reminders(executions));
+        } catch (RuntimeException e) {
+            rootSpan.addAttribute("error", e.getMessage());
+            throw e;
+        } finally {
+            rootSpan.close();
+            exportTrace(rootSpan, workDir, "cli");
         }
     }
 
@@ -237,63 +275,86 @@ public final class AgentEngine implements AgentRunner {
         PromptComposer activeComposer = new PromptComposer(sessionWorkDir, planMode);
         Schema.Message systemMessage = activeComposer.build();
 
-        LOG.info("[Engine] 唤醒会话 [" + session.id() + "]，锁定工作区: " + sessionWorkDir);
-        LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
-        LOG.info("[Engine] 计划模式 (Plan Mode): " + planMode);
+        Trace.Span rootSpan = Trace.startSpan("Agent.Run");
+        rootSpan.addAttribute("session_id", session.id());
+        rootSpan.addAttribute("work_dir", sessionWorkDir.toString());
+        rootSpan.addAttribute("plan_mode", planMode);
+        rootSpan.addAttribute("enable_thinking", enableThinking);
+        try {
+            LOG.info("[Engine] 唤醒会话 [" + session.id() + "]，锁定工作区: " + sessionWorkDir);
+            LOG.info("[Engine] 慢思考模式 (Thinking Phase): " + enableThinking);
+            LOG.info("[Engine] 计划模式 (Plan Mode): " + planMode);
 
-        int turnCount = 0;
-        while (true) {
-            turnCount++;
-            if (turnCount > maxTurns()) {
-                throw new IllegalStateException("Main Loop 超过最大轮数，疑似进入 Doom Loop。");
-            }
-
-            List<Schema.Message> contextHistory = new ArrayList<>();
-            contextHistory.add(systemMessage);
-            contextHistory.addAll(session.getWorkingMemory(SESSION_CONTEXT_LIMIT));
-
-            LOG.info("========== [Session " + session.id() + " / Turn " + turnCount + "] 开始 ==========");
-            LOG.info("[Engine] Working Memory 消息数: " + (contextHistory.size() - 1)
-                    + " / Session 历史总数: " + session.historySize());
-
-            List<Schema.ToolDefinition> availableTools = activeRegistry.getAvailableTools();
-
-            if (enableThinking) {
-                LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
-                callReporter(reporter, "onThinking", () -> reporter.onThinking());
-                Schema.Message thinkResp = provider.generate(compactForProvider(thinkingContext(contextHistory)), List.of());
-                if (thinkResp == null) {
-                    throw new IllegalStateException("Thinking 阶段模型返回空消息。");
+            int turnCount = 0;
+            while (true) {
+                turnCount++;
+                if (turnCount > maxTurns()) {
+                    throw new IllegalStateException("Main Loop 超过最大轮数，疑似进入 Doom Loop。");
                 }
 
-                if (thinkResp.content() != null && !thinkResp.content().isBlank()) {
-                    session.append(thinkResp);
-                    contextHistory.add(thinkResp);
+                try (Trace.Span turnSpan = Trace.startSpan("Turn-" + turnCount)) {
+                    turnSpan.addAttribute("turn", turnCount);
+                    turnSpan.addAttribute("session_history_size", session.historySize());
+                    List<Schema.Message> contextHistory = new ArrayList<>();
+                    contextHistory.add(systemMessage);
+                    contextHistory.addAll(session.getWorkingMemory(SESSION_CONTEXT_LIMIT));
+
+                    LOG.info("========== [Session " + session.id() + " / Turn " + turnCount + "] 开始 ==========");
+                    LOG.info("[Engine] Working Memory 消息数: " + (contextHistory.size() - 1)
+                            + " / Session 历史总数: " + session.historySize());
+                    turnSpan.addAttribute("working_memory_count", contextHistory.size() - 1);
+
+                    List<Schema.ToolDefinition> availableTools = activeRegistry.getAvailableTools();
+                    turnSpan.addAttribute("available_tools_count", availableTools.size());
+
+                    if (enableThinking) {
+                        LOG.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
+                        callReporter(reporter, "onThinking", () -> reporter.onThinking());
+                        Schema.Message thinkResp = generateWithTrace(
+                                "LLM.Thinking",
+                                compactForProvider(thinkingContext(contextHistory)),
+                                List.of());
+                        if (thinkResp == null) {
+                            throw new IllegalStateException("Thinking 阶段模型返回空消息。");
+                        }
+
+                        if (thinkResp.content() != null && !thinkResp.content().isBlank()) {
+                            session.append(thinkResp);
+                            contextHistory.add(thinkResp);
+                        }
+                    }
+
+                    LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
+                    Schema.Message actionResp = generateWithTrace("LLM.Action", compactForProvider(contextHistory), availableTools);
+                    if (actionResp == null) {
+                        throw new IllegalStateException("Action 阶段模型返回空消息。");
+                    }
+
+                    session.append(actionResp);
+                    contextHistory.add(actionResp);
+                    turnSpan.addAttribute("tool_call_count", actionResp.toolCalls().size());
+                    if (actionResp.content() != null && !actionResp.content().isBlank()) {
+                        callReporter(reporter, "onMessage", () -> reporter.onMessage(actionResp.content()));
+                    }
+
+                    if (!actionResp.hasToolCalls()) {
+                        LOG.info("[Engine] 模型未请求调用工具，本次会话任务挂起等待下一条人类指令。");
+                        break;
+                    }
+
+                    List<ToolExecution> executions =
+                            executeToolCallsInParallel(activeRegistry, actionResp.toolCalls(), reporter);
+                    LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
+                    session.append(observations(executions));
+                    session.append(reminders(executions));
                 }
             }
-
-            LOG.info("[Engine][Phase 2] 恢复工具挂载，等待模型采取行动...");
-            Schema.Message actionResp = provider.generate(compactForProvider(contextHistory), availableTools);
-            if (actionResp == null) {
-                throw new IllegalStateException("Action 阶段模型返回空消息。");
-            }
-
-            session.append(actionResp);
-            contextHistory.add(actionResp);
-            if (actionResp.content() != null && !actionResp.content().isBlank()) {
-                callReporter(reporter, "onMessage", () -> reporter.onMessage(actionResp.content()));
-            }
-
-            if (!actionResp.hasToolCalls()) {
-                LOG.info("[Engine] 模型未请求调用工具，本次会话任务挂起等待下一条人类指令。");
-                break;
-            }
-
-            List<ToolExecution> executions =
-                    executeToolCallsInParallel(activeRegistry, actionResp.toolCalls(), reporter);
-            LOG.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...");
-            session.append(observations(executions));
-            session.append(reminders(executions));
+        } catch (RuntimeException e) {
+            rootSpan.addAttribute("error", e.getMessage());
+            throw e;
+        } finally {
+            rootSpan.close();
+            exportTrace(rootSpan, sessionWorkDir, session.id());
         }
     }
 
@@ -302,12 +363,53 @@ public final class AgentEngine implements AgentRunner {
         return Objects.requireNonNull(activeRegistry, "session registry");
     }
 
+    private void exportTrace(Trace.Span rootSpan, Path traceWorkDir, String sessionId) {
+        try {
+            Path traceFile = Trace.exportTraceToFile(rootSpan, traceWorkDir, sessionId);
+            LOG.info("[Tracing] 本次任务的执行回放链路已保存: " + traceFile);
+        } catch (RuntimeException | java.io.IOException e) {
+            LOG.warning("[Tracing] 导出链路追踪文件失败: " + e.getMessage());
+        }
+    }
+
     private int maxTurns() {
         return planMode ? PLAN_MODE_MAX_TURNS : DEFAULT_MAX_TURNS;
     }
 
     private List<Schema.Message> compactForProvider(List<Schema.Message> messages) {
         return compactor.compact(messages);
+    }
+
+    /**
+     * 包装所有 LLM 调用的统一埋点入口，记录上下文规模、可用工具数、模型输出和 Usage。
+     */
+    private Schema.Message generateWithTrace(
+            String spanName,
+            List<Schema.Message> messages,
+            List<Schema.ToolDefinition> availableTools) {
+        Trace.Span span = Trace.startSpan(spanName);
+        try {
+            span.addAttribute("context_message_count", messages == null ? 0 : messages.size());
+            span.addAttribute("context_chars", messages == null ? 0 : compactor.estimateLength(messages));
+            span.addAttribute("available_tools_count", availableTools == null ? 0 : availableTools.size());
+
+            Schema.Message response = provider.generate(messages, availableTools);
+            if (response != null) {
+                span.addAttribute("response_chars", response.content() == null ? 0 : response.content().length());
+                span.addAttribute("tool_call_count", response.toolCalls().size());
+                if (response.usage() != null) {
+                    span.addAttribute("prompt_tokens", response.usage().promptTokens());
+                    span.addAttribute("completion_tokens", response.usage().completionTokens());
+                    span.addAttribute("total_tokens", response.usage().totalTokens());
+                }
+            }
+            return response;
+        } catch (RuntimeException e) {
+            span.addAttribute("error", e.getMessage());
+            throw e;
+        } finally {
+            span.close();
+        }
     }
 
     private List<ToolExecution> executeToolCallsInParallel(
@@ -323,8 +425,11 @@ public final class AgentEngine implements AgentRunner {
             for (int i = 0; i < toolCalls.size(); i++) {
                 final int index = i;
                 final Schema.ToolCall toolCall = toolCalls.get(i);
+                final Trace.Span parentSpan = Trace.currentSpan();
                 futures.add(CompletableFuture.supplyAsync(
-                        () -> executeOneTool(activeRegistry, index, toolCall, reporter), executor));
+                        () -> Trace.callWithParent(parentSpan,
+                                () -> executeOneTool(activeRegistry, index, toolCall, reporter)),
+                        executor));
             }
 
             List<ToolExecution> executions = new ArrayList<>(toolCalls.size());

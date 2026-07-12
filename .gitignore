@@ -4,6 +4,8 @@ target/
 workspace/*.java
 workspace/*.go
 workspace/answer.txt
+workspace/trace_test.md
+workspace/.claw/
 workspace/legacy/
 workspace_sessions/
 workspace_plan/
